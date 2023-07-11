@@ -19,6 +19,7 @@ using Api.Modules.Templates.Services;
 using GeeksCoreLibrary.Core.Extensions;
 using GeeksCoreLibrary.Modules.Databases.Interfaces;
 using GeeksCoreLibrary.Modules.Databases.Services;
+using IdentityServer4;
 using IdentityServer4.Services;
 using JavaScriptEngineSwitcher.ChakraCore;
 using JavaScriptEngineSwitcher.Extensions.MsDependencyInjection;
@@ -172,23 +173,6 @@ namespace Api
                     });
             });
 
-            // Set Newtonsoft as the default JSON serializer and configure it to use camel case.
-            services.AddControllers(options => { options.AllowEmptyInputInBodyModelBinding = true; }).AddNewtonsoftJson(options =>
-            {
-                options.SerializerSettings.ContractResolver = new DefaultContractResolver()
-                {
-                    NamingStrategy = new CamelCaseNamingStrategy(false, true, false)
-                };
-
-                options.SerializerSettings.Formatting = Formatting.Indented;
-                options.SerializerSettings.NullValueHandling = NullValueHandling.Ignore;
-                options.SerializerSettings.DateTimeZoneHandling = DateTimeZoneHandling.Local;
-                options.SerializerSettings.Converters.Add(new StringEnumConverter());
-            });
-
-            // Make sure all API URLs are lower case.
-            services.Configure<RouteOptions>(options => options.LowercaseUrls = true);
-
             // Configure OAuth2
             var identityServerBuilder = services.AddIdentityServer(options =>
                 {
@@ -240,7 +224,14 @@ namespace Api
                             ValidateAudience = false,
                             ClockSkew = webHostEnvironment.IsDevelopment() ? new TimeSpan(0, 0, 0, 5) : new TimeSpan(0, 0, 5, 0)
                         };
-                    });
+                    })
+                // Configure Google authentication
+                .AddGoogle("Google", options =>
+                {
+                    options.ClientId = Configuration.GetValue<string>("Api:GoogleAuthentication:ClientId");
+                    options.ClientSecret = Configuration.GetValue<string>("Api:GoogleAuthentication:ClientSecret");
+                    options.SignInScheme = IdentityServerConstants.ExternalCookieAuthenticationScheme;
+                });
 
             services.AddAuthorization(options =>
             {
@@ -251,6 +242,23 @@ namespace Api
                         policy.RequireClaim("scope", "wiser-api");
                     });
             });
+
+            // Set Newtonsoft as the default JSON serializer and configure it to use camel case.
+            services.AddControllers(options => { options.AllowEmptyInputInBodyModelBinding = true; }).AddNewtonsoftJson(options =>
+            {
+                options.SerializerSettings.ContractResolver = new DefaultContractResolver()
+                {
+                    NamingStrategy = new CamelCaseNamingStrategy(false, true, false)
+                };
+
+                options.SerializerSettings.Formatting = Formatting.Indented;
+                options.SerializerSettings.NullValueHandling = NullValueHandling.Ignore;
+                options.SerializerSettings.DateTimeZoneHandling = DateTimeZoneHandling.Local;
+                options.SerializerSettings.Converters.Add(new StringEnumConverter());
+            });
+
+            // Make sure all API URLs are lower case.
+            services.Configure<RouteOptions>(options => options.LowercaseUrls = true);
 
             // Enable CORS for Identityserver 4.
             services.AddSingleton<ICorsPolicyService>((container) =>

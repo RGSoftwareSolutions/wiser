@@ -1,4 +1,5 @@
 ﻿using System.Collections.Generic;
+using Api.Core.Models;
 
 namespace FrontEnd.Core.Models
 {
@@ -63,5 +64,10 @@ namespace FrontEnd.Core.Models
         /// This value is not used when not using multi tenancy.
         /// </summary>
         public string MainSubDomain { get; set; } = "main";
+
+        /// <summary>
+        /// Gets or sets the settings for Google authentication.
+        /// </summary>
+        public GoogleAuthenticationSettings GoogleAuthentication { get; set; } = new();
     }
 }
