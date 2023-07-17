@@ -212,12 +212,12 @@ namespace Api
             {
                 // Create an X509Store for the Web Hosting store and see if the certificate is there.
                 var certificateName = Configuration.GetValue<string>("Api:SigningCredentialCertificate");
-                using var webHostingStore = new X509Store("WebHosting", StoreLocation.CurrentUser);
+                using var webHostingStore = new X509Store("WebHosting", StoreLocation.LocalMachine);
                 webHostingStore.Open(OpenFlags.ReadOnly);
                 var certificateCollection = webHostingStore.Certificates.Find(X509FindType.FindBySubjectDistinguishedName, certificateName, validOnly: false);
                 if (certificateCollection.Count == 0)
                 {
-                    using var personalStore = new X509Store(StoreName.My, StoreLocation.CurrentUser);
+                    using var personalStore = new X509Store(StoreName.My, StoreLocation.LocalMachine);
                     personalStore.Open(OpenFlags.ReadOnly);
                     certificateCollection = personalStore.Certificates.Find(X509FindType.FindBySubjectDistinguishedName, certificateName, validOnly: false);
 
