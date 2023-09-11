@@ -4,6 +4,7 @@ using System.Data;
 using System.Linq;
 using System.Net;
 using System.Security.Claims;
+using System.Text;
 using System.Threading.Tasks;
 using Api.Core.Helpers;
 using Api.Core.Interfaces;
@@ -44,7 +45,8 @@ namespace Api.Modules.Modules.Services
         private readonly IStringReplacementsService stringReplacementsService;
         private readonly ILogger<ModulesService> logger;
         private readonly IDatabaseHelpersService databaseHelpersService;
-
+        private readonly ICsvService csvService;
+        
         private const string DefaultModulesGroupName = "Overig";
         private const string PinnedModulesGroupName = "Vastgepind";
 
@@ -55,7 +57,8 @@ namespace Api.Modules.Modules.Services
             IDatabaseConnection clientDatabaseConnection, IWiserItemsService wiserItemsService,
             IJsonService jsonService, IExcelService excelService, IObjectsService objectsService,
             IUsersService usersService, IStringReplacementsService stringReplacementsService,
-            ILogger<ModulesService> logger, IDatabaseHelpersService databaseHelpersService)
+            ILogger<ModulesService> logger, IDatabaseHelpersService databaseHelpersService,
+            ICsvService csvService)
         {
             this.wiserCustomersService = wiserCustomersService;
             this.gridsService = gridsService;
@@ -67,6 +70,7 @@ namespace Api.Modules.Modules.Services
             this.stringReplacementsService = stringReplacementsService;
             this.logger = logger;
             this.databaseHelpersService = databaseHelpersService;
+            this.csvService = csvService;
             this.clientDatabaseConnection = clientDatabaseConnection;
         }
 
@@ -75,15 +79,15 @@ namespace Api.Modules.Modules.Services
         {
             var modulesForAdmins = new List<int>
             {
-                700, // Stamgegevens
-                706, // Data selector
-                709, // Search module
-                737, // Admin
-                738, // Import / export
-                806, // Wiser users
-                5505, // Webpagina's
-                1, // Templates
-                6000 // Version control
+                Constants.DefaultMasterDataModuleId,
+                Constants.DefaultDataSelectorModuleId,
+                Constants.DefaultSearchModuleId,
+                Constants.DefaultAdminModuleId,
+                Constants.DefaultImportExportModuleId,
+                Constants.DefaultWiserUsersModuleId,
+                Constants.DefaultWebpagesModuleId,
+                Constants.DefaultTemplatesModuleId,
+                Constants.DefaultVersionControlModuleId
             };
 
             var isAdminAccount = IdentityHelpers.IsAdminAccount(identity);
@@ -92,14 +96,26 @@ namespace Api.Modules.Modules.Services
 
             await clientDatabaseConnection.EnsureOpenConnectionForReadingAsync();
 
+            var lastTableUpdates = await databaseHelpersService.GetLastTableUpdatesAsync(clientDatabaseConnection.ConnectedDatabase);
+
+            // If the table changes don't contain wiser_itemdetail, it means this is an older database.
+            // We can assume that this database already has the able, otherwise nothing would work.
+            // We add that table to the list of last table updates, so that the GCL doesn't try to add any indexes that might be missing,
+            // because that takes a very long time for old databases with lots of data.
+            if (!lastTableUpdates.ContainsKey(WiserTableNames.WiserItemDetail))
+            {
+                await clientDatabaseConnection.ExecuteAsync($"INSERT IGNORE INTO {WiserTableNames.WiserTableChanges} (name, last_update) VALUES ('{WiserTableNames.WiserItemDetail}', '{DateTime.Now:yyyy-MM-dd HH:mm:ss}')");
+                lastTableUpdates.TryAdd(WiserTableNames.WiserItemDetail, DateTime.Now);
+            }
+
             // Make sure that Wiser tables are up-to-date.
             const string TriggersName = "wiser_triggers";
-            await databaseHelpersService.CheckAndUpdateTablesAsync(new List<string> { 
+            await databaseHelpersService.CheckAndUpdateTablesAsync(new List<string> {
                 WiserTableNames.WiserEntity,
                 WiserTableNames.WiserEntityProperty,
                 WiserTableNames.WiserLink
             });
-            await databaseHelpersService.CheckAndUpdateTablesAsync(new List<string> { 
+            await databaseHelpersService.CheckAndUpdateTablesAsync(new List<string> {
                 WiserTableNames.WiserItem,
                 WiserTableNames.WiserItemDetail,
                 WiserTableNames.WiserModule ,
@@ -118,23 +134,45 @@ namespace Api.Modules.Modules.Services
                 WiserTableNames.WiserCommunication,
                 GeeksCoreLibrary.Modules.Databases.Models.Constants.DatabaseConnectionLogTableName
             });
-            var lastTableUpdates = await databaseHelpersService.GetLastTableUpdatesAsync();
-            
+
             // Make sure that all triggers for Wiser tables are up-to-date.
             if (!lastTableUpdates.ContainsKey(TriggersName) || lastTableUpdates[TriggersName] < new DateTime(2023, 1, 3))
             {
                 var createTriggersQuery = await ResourceHelpers.ReadTextResourceFromAssemblyAsync("Api.Core.Queries.WiserInstallation.CreateTriggers.sql");
                 await clientDatabaseConnection.ExecuteAsync(createTriggersQuery);
-                
+
                 // Update wiser_table_changes.
                 clientDatabaseConnection.AddParameter("tableName", TriggersName);
                 clientDatabaseConnection.AddParameter("lastUpdate", DateTime.Now);
                 await clientDatabaseConnection.ExecuteAsync($@"INSERT INTO {WiserTableNames.WiserTableChanges} (name, last_update) 
 VALUES (?tableName, ?lastUpdate) 
 ON DUPLICATE KEY UPDATE last_update = VALUES(last_update)");
+                clientDatabaseConnection.ClearParameters();
             }
 
-            clientDatabaseConnection.ClearParameters();
+            const string TemplateCachingName = "wiser_template_caching";
+            if (!lastTableUpdates.TryGetValue(TemplateCachingName, out var updateDate) || updateDate < new DateTime(2023, 6, 2))
+            {
+                if (await databaseHelpersService.ColumnExistsAsync(WiserTableNames.WiserTemplate, "use_cache"))
+                {
+                    const string CacheUpdateQuery = @$"UPDATE {WiserTableNames.WiserTemplate}
+SET cache_per_url = IF(use_cache >= 3, 1, 0),
+    cache_per_querystring = IF(use_cache >= 4, 1, 0),
+    cache_per_hostname = IF(use_cache = 5, 1, 0),
+    cache_using_regex = IF(use_cache = 6, 1, 0),
+    cache_minutes = IF(use_cache = 0 AND cache_minutes <= 0, -1, cache_minutes)";
+                    await clientDatabaseConnection.ExecuteAsync(CacheUpdateQuery);
+                }
+
+                // Update wiser_table_changes.
+                clientDatabaseConnection.AddParameter("tableName", TemplateCachingName);
+                clientDatabaseConnection.AddParameter("lastUpdate", DateTime.Now);
+                await clientDatabaseConnection.ExecuteAsync($@"INSERT INTO {WiserTableNames.WiserTableChanges} (name, last_update) 
+VALUES (?tableName, ?lastUpdate) 
+ON DUPLICATE KEY UPDATE last_update = VALUES(last_update)");
+                clientDatabaseConnection.ClearParameters();
+            }
+
             clientDatabaseConnection.AddParameter("userId", IdentityHelpers.GetWiserUserId(identity));
 
             var query = $@"(
@@ -183,7 +221,7 @@ UNION
             }
 
             var onlyOneInstanceAllowedGlobal = String.Equals(await objectsService.FindSystemObjectByDomainNameAsync("wiser_modules_OnlyOneInstanceAllowed",                                                                                                                     "false"), "true", StringComparison.OrdinalIgnoreCase);
-            
+
             foreach (DataRow dataRow in dataTable.Rows)
             {
                 var moduleId = dataRow.Field<int>("module_id");
@@ -303,7 +341,7 @@ UNION
                     var isPinned = pinnedModules.Contains(moduleId);
                     switch (moduleId)
                     {
-                        case 700: // Stamgegevens
+                        case Constants.DefaultMasterDataModuleId:
                             groupName = isPinned ? PinnedModulesGroupName : "Instellingen";
                             if (!results.ContainsKey(groupName))
                             {
@@ -325,7 +363,7 @@ UNION
                                 PinnedGroup = PinnedModulesGroupName
                             });
                             break;
-                        case 706: // Data selector
+                        case Constants.DefaultDataSelectorModuleId:
                             groupName = isPinned ? PinnedModulesGroupName : "Contentbeheer";
                             if (!results.ContainsKey(groupName))
                             {
@@ -347,7 +385,7 @@ UNION
                                 PinnedGroup = PinnedModulesGroupName
                             });
                             break;
-                        case 709: // Search
+                        case Constants.DefaultSearchModuleId:
                             groupName = isPinned ? PinnedModulesGroupName : "Contentbeheer";
                             if (!results.ContainsKey(groupName))
                             {
@@ -369,7 +407,7 @@ UNION
                                 PinnedGroup = PinnedModulesGroupName
                             });
                             break;
-                        case 737: // Admin
+                        case Constants.DefaultAdminModuleId:
                             groupName = isPinned ? PinnedModulesGroupName : "Instellingen";
                             if (!results.ContainsKey(groupName))
                             {
@@ -391,7 +429,7 @@ UNION
                                 PinnedGroup = PinnedModulesGroupName
                             });
                             break;
-                        case 738: // Import/export
+                        case Constants.DefaultImportExportModuleId:
                             groupName = isPinned ? PinnedModulesGroupName : "Contentbeheer";
                             if (!results.ContainsKey(groupName))
                             {
@@ -413,7 +451,7 @@ UNION
                                 PinnedGroup = PinnedModulesGroupName
                             });
                             break;
-                        case 806: // Wiser users
+                        case Constants.DefaultWiserUsersModuleId:
                             groupName = isPinned ? PinnedModulesGroupName : "Instellingen";
                             if (!results.ContainsKey(groupName))
                             {
@@ -435,7 +473,7 @@ UNION
                                 PinnedGroup = PinnedModulesGroupName
                             });
                             break;
-                        case 5505: // Webpagina's
+                        case Constants.DefaultWebpagesModuleId:
                             groupName = isPinned ? PinnedModulesGroupName : "Contentbeheer";
                             if (!results.ContainsKey(groupName))
                             {
@@ -457,7 +495,7 @@ UNION
                                 PinnedGroup = PinnedModulesGroupName
                             });
                             break;
-                        case 6000: // Version control
+                        case Constants.DefaultVersionControlModuleId:
                             groupName = isPinned ? PinnedModulesGroupName : "Systeem";
                             if (!results.ContainsKey(groupName))
                             {
@@ -478,7 +516,7 @@ UNION
                                 PinnedGroup = PinnedModulesGroupName
                             });
                             break;
-                        case 1: // Templates
+                        case Constants.DefaultTemplatesModuleId:
                             groupName = isPinned ? PinnedModulesGroupName : "Systeem";
                             if (!results.ContainsKey(groupName))
                             {
@@ -595,7 +633,7 @@ UNION
         }
 
         /// <inheritdoc />
-        public async Task<ServiceResult<ModuleSettingsModel>> GetSettingsAsync(int id, ClaimsIdentity identity)
+        public async Task<ServiceResult<ModuleSettingsModel>> GetSettingsAsync(int id, ClaimsIdentity identity, bool encryptValues = true)
         {
             var customer = await wiserCustomersService.GetSingleAsync(identity);
             var encryptionKey = customer.ModelObject.EncryptionKey;
@@ -604,8 +642,7 @@ UNION
 
             await clientDatabaseConnection.EnsureOpenConnectionForReadingAsync();
             clientDatabaseConnection.ClearParameters();
-            var userItemPermissions =
-                await wiserItemsService.GetUserModulePermissions(id, IdentityHelpers.GetWiserUserId(identity));
+            var userItemPermissions = await wiserItemsService.GetUserModulePermissions(id, IdentityHelpers.GetWiserUserId(identity));
 
             result.CanRead = (userItemPermissions & AccessRights.Read) == AccessRights.Read;
             result.CanCreate = (userItemPermissions & AccessRights.Create) == AccessRights.Create;
@@ -641,7 +678,11 @@ UNION
             }
 
             var parsedOptionsJson = JToken.Parse(optionsJson);
-            jsonService.EncryptValuesInJson(parsedOptionsJson, encryptionKey, new List<string> {"itemId"});
+
+            if (encryptValues)
+            {
+                jsonService.EncryptValuesInJson(parsedOptionsJson, encryptionKey, new List<string> {"itemId"});
+            }
 
             result.Options = parsedOptionsJson;
 
@@ -655,13 +696,12 @@ UNION
             clientDatabaseConnection.ClearParameters();
             clientDatabaseConnection.AddParameter("name", name);
 
-            var query = $@"
-                        SET @newID = (SELECT MAX(id)+ 1 FROM wiser_module);
-                        INSERT INTO {WiserTableNames.WiserModule}(id,`name`)
-                        VALUES (@newID, ?name); 
-                        INSERT IGNORE INTO {WiserTableNames.WiserPermission}(role_id,entity_name,item_id,entity_property_id, permissions,module_id)
-                        VALUES (1, '', 0, 0, 15, @newID);
-                        SELECT @newID;";
+            var query = $@"SET @newID = (SELECT MAX(id)+ 1 FROM wiser_module);
+INSERT INTO {WiserTableNames.WiserModule} (id,`name`)
+VALUES (@newID, ?name); 
+INSERT IGNORE INTO {WiserTableNames.WiserPermission}(role_id,entity_name,item_id,entity_property_id, permissions,module_id)
+VALUES (1, '', 0, 0, 15, @newID);
+SELECT @newID;";
 
             var dataTable = await clientDatabaseConnection.GetAsync(query);
             var id = Convert.ToInt32(dataTable.Rows[0][0]);
@@ -670,7 +710,7 @@ UNION
         }
 
         /// <inheritdoc />
-        public async Task<ServiceResult<byte[]>> ExportAsync(int id, ClaimsIdentity identity)
+        public async Task<ServiceResult<byte[]>> ExportToExcelAsync(int id, ClaimsIdentity identity)
         {
             var gridResult = await gridsService.GetOverviewGridDataAsync(id, new GridReadOptionsModel(), identity, true);
             if (gridResult.StatusCode != HttpStatusCode.OK)
@@ -704,6 +744,43 @@ UNION
             var result = excelService.JsonArrayToExcel(newData);
             return new ServiceResult<byte[]>(result);
         }
+        
+        /// <inheritdoc />
+        public async Task<ServiceResult<byte[]>> ExportToCsvAsync(int id, ClaimsIdentity identity, char separator)
+        {
+            var gridResult = await gridsService.GetOverviewGridDataAsync(id, new GridReadOptionsModel(), identity, true);
+            if (gridResult.StatusCode != HttpStatusCode.OK)
+            {
+                return new ServiceResult<byte[]>
+                {
+                    ErrorMessage = gridResult.ErrorMessage,
+                    StatusCode = gridResult.StatusCode
+                };
+            }
+            
+            var newData = new JArray();
+            var data = gridResult.ModelObject.Data;
+            var columns = gridResult.ModelObject.Columns;
+            foreach (var item in data)
+            {
+                var newObject = new JObject();
+                foreach (var column in columns)
+                {
+                    if (String.IsNullOrWhiteSpace(column.Field))
+                    {
+                        continue;
+                    }
+
+                    newObject.Add(new JProperty(column.Title, item[column.Field.ToLowerInvariant()]));
+                }
+
+                newData.Add(newObject);
+            }
+
+            var csvString = csvService.JsonArrayToCsv(newData);
+            var result = Encoding.UTF8.GetBytes(csvString);
+            return new ServiceResult<byte[]>(result);
+        }
 
         /// <inheritdoc />
         public async Task<ServiceResult<List<string>>> GetModuleGroupsAsync(ClaimsIdentity identity)
@@ -716,7 +793,7 @@ ORDER BY `group` ASC");
             var results = dataTable.Rows.Cast<DataRow>().Select(dataRow => dataRow.Field<string>("group"));
             return new ServiceResult<List<string>>(results.ToList());
         }
-        
+
         /// <inheritdoc />
         public async Task<ServiceResult<bool>> DeleteAsync(ClaimsIdentity identity, int id)
         {
@@ -755,16 +832,16 @@ DELETE FROM {WiserTableNames.WiserPermission} WHERE module_id = ?id;";
             clientDatabaseConnection.AddParameter("group", moduleSettingsModel.Group);
 
             var query = $@"UPDATE {WiserTableNames.WiserModule}
-                            SET `id` = ?new_id,
-                                `custom_query` = ?custom_query,
-                                `count_query` = ?count_query,
-                                `options` = IF(?options != '' AND ?options IS NOT NULL AND JSON_VALID(?options), ?options, ''),
-                                `name` = ?name,
-                                `icon` = ?icon,
-                                `type` = ?type,
-                                `group` = ?group
-                        WHERE id = ?id";
-            
+SET `id` = ?new_id,
+    `custom_query` = ?custom_query,
+    `count_query` = ?count_query,
+    `options` = IF(?options != '' AND ?options IS NOT NULL AND JSON_VALID(?options), ?options, ''),
+    `name` = ?name,
+    `icon` = ?icon,
+    `type` = ?type,
+    `group` = ?group
+WHERE id = ?id";
+
             await clientDatabaseConnection.ExecuteAsync(query);
             return new ServiceResult<bool>(true)
             {

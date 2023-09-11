@@ -40,9 +40,9 @@ namespace Api.Modules.Templates.Services
         }
 
         /// <inheritdoc />
-        public async Task<ServiceResult<List<HistoryVersionModel>>> GetChangesInComponentAsync(int contentId)
+        public async Task<ServiceResult<List<HistoryVersionModel>>> GetChangesInComponentAsync(int contentId, int pageNumber, int itemsPerPage)
         {
-            var historyList = await GetHistoryOfComponent(contentId);
+            var historyList = await GetHistoryOfComponent(contentId, pageNumber, itemsPerPage);
             historyList = historyList.OrderByDescending(version => version.Version).ToList();
 
             for (var i = 0; i + 1 < historyList.Count; i++)
@@ -74,9 +74,9 @@ namespace Api.Modules.Templates.Services
                     }
                 }
             }
-            
+
             var componentAndMode = await dataService.GetComponentAndModeFromContentIdAsync(contentId);
-            await dataService.SaveSettingsStringAsync(contentId, componentAndMode[0], componentAndMode[1], currentVersion.Key, currentVersion.Value, IdentityHelpers.GetUserName(identity, true));
+            await dataService.SaveAsync(contentId, componentAndMode[0], componentAndMode[1], currentVersion.Key, currentVersion.Value, IdentityHelpers.GetUserName(identity, true));
             return new ServiceResult<int>
             {
                 StatusCode = HttpStatusCode.NoContent
@@ -98,16 +98,21 @@ namespace Api.Modules.Templates.Services
         public async Task<PublishedEnvironmentModel> GetHistoryVersionsOfDynamicContent(int templateId)
         {
             var versionsAndPublished = await historyDataService.GetPublishedEnvironmentsFromDynamicContentAsync(templateId);
-            
+
             return PublishedEnvironmentHelper.CreatePublishedEnvironmentsFromVersionDictionary(versionsAndPublished);
         }
-        
+
         /// <inheritdoc />
-        public async Task<List<TemplateHistoryModel>> GetVersionHistoryFromTemplate(ClaimsIdentity identity, int templateId, Dictionary<DynamicContentOverviewModel, List<HistoryVersionModel>> dynamicContent)
+        public async Task<List<TemplateHistoryModel>> GetVersionHistoryFromTemplate(ClaimsIdentity identity, int templateId, Dictionary<DynamicContentOverviewModel, List<HistoryVersionModel>> dynamicContent, int pageNumber, int itemsPerPage)
         {
             var encryptionKey = (await wiserCustomersService.GetEncryptionKey(identity, true)).ModelObject;
-            var rawTemplateModels = await historyDataService.GetTemplateHistoryAsync(templateId);
+            var rawTemplateModels = await historyDataService.GetTemplateHistoryAsync(templateId, pageNumber, itemsPerPage);
 
+            if (rawTemplateModels.Count == 0)
+            {
+                return new List<TemplateHistoryModel>();
+            }
+            
             templateDataService.DecryptEditorValueIfEncrypted(encryptionKey, rawTemplateModels[0]);
 
             var templateHistory = new List<TemplateHistoryModel>();
@@ -136,11 +141,11 @@ namespace Api.Modules.Templates.Services
             templateHistory.Add(new TemplateHistoryModel(rawTemplateModels.Last().TemplateId, rawTemplateModels.Last().Version, rawTemplateModels.Last().ChangedOn, rawTemplateModels.Last().ChangedBy));
             return templateHistory;
         }
-        
+
         /// <inheritdoc />
-        public async Task<List<PublishHistoryModel>> GetPublishHistoryFromTemplate(int templateId)
+        public async Task<List<PublishHistoryModel>> GetPublishHistoryFromTemplate(int templateId, int pageNumber, int itemsPerPage)
         {
-            return await historyDataService.GetPublishHistoryFromTemplateAsync(templateId);
+            return await historyDataService.GetPublishHistoryFromTemplateAsync(templateId, pageNumber, itemsPerPage);
         }
 
         /// <summary>
@@ -152,12 +157,15 @@ namespace Api.Modules.Templates.Services
         private TemplateHistoryModel GenerateHistoryModelForTemplates(TemplateSettingsModel newVersion, TemplateSettingsModel oldVersion)
         {
             var historyModel = new TemplateHistoryModel(newVersion.TemplateId, newVersion.Version, newVersion.ChangedOn, newVersion.ChangedBy);
-            
+
             CheckIfValuesMatchAndSaveChangesToHistoryModel("name", newVersion.Name, oldVersion.Name, historyModel);
             CheckIfValuesMatchAndSaveChangesToHistoryModel("editorValue", newVersion.EditorValue, oldVersion.EditorValue, historyModel);
-            CheckIfValuesMatchAndSaveChangesToHistoryModel("useCache", newVersion.UseCache, oldVersion.UseCache, historyModel);
             CheckIfValuesMatchAndSaveChangesToHistoryModel("cacheMinutes", newVersion.CacheMinutes, oldVersion.CacheMinutes, historyModel);
             CheckIfValuesMatchAndSaveChangesToHistoryModel("cacheLocation", newVersion.CacheLocation, oldVersion.CacheLocation, historyModel);
+            CheckIfValuesMatchAndSaveChangesToHistoryModel("cachePerUrl", newVersion.CachePerUrl, oldVersion.CachePerUrl, historyModel);
+            CheckIfValuesMatchAndSaveChangesToHistoryModel("cacheUsingRegex", newVersion.CacheUsingRegex, oldVersion.CacheUsingRegex, historyModel);
+            CheckIfValuesMatchAndSaveChangesToHistoryModel("cachePerHostName", newVersion.CachePerHostName, oldVersion.CachePerHostName, historyModel);
+            CheckIfValuesMatchAndSaveChangesToHistoryModel("cachePerQueryString", newVersion.CachePerQueryString, oldVersion.CachePerQueryString, historyModel);
             CheckIfValuesMatchAndSaveChangesToHistoryModel("cacheRegex", newVersion.CacheRegex, oldVersion.CacheRegex, historyModel);
             CheckIfValuesMatchAndSaveChangesToHistoryModel("loginRequired", newVersion.LoginRequired, oldVersion.LoginRequired, historyModel);
             CheckIfValuesMatchAndSaveChangesToHistoryModel("loginRole", newVersion.LoginRoles == null ? "" : String.Join(",", newVersion.LoginRoles), oldVersion.LoginRoles == null ? "" : String.Join(",", oldVersion.LoginRoles), historyModel);
@@ -228,8 +236,8 @@ namespace Api.Modules.Templates.Services
             {
                 return;
             }
-            
-            if ((newValue == null || (newValue is string stringValue && String.IsNullOrWhiteSpace(stringValue))) 
+
+            if ((newValue == null || (newValue is string stringValue && String.IsNullOrWhiteSpace(stringValue)))
                 && (oldValue == null || (oldValue is string oldStringValue && String.IsNullOrWhiteSpace(oldStringValue))))
             {
                 return;
@@ -242,10 +250,12 @@ namespace Api.Modules.Templates.Services
         /// Get the raw list of versions of the component. These historymodels have a rawdatastring and no generated changes.
         /// </summary>
         /// <param name="templateId">The id of the content to retrieve the versions of.</param>
+        /// <param name="pageNumber">What page number to load</param>
+        /// <param name="itemsPerPage">How many versions are being loaded per page</param>
         /// <returns>List of HistoryVersionModels forming</returns>
-        private async Task<List<HistoryVersionModel>> GetHistoryOfComponent(int templateId)
+        private async Task<List<HistoryVersionModel>> GetHistoryOfComponent(int templateId, int pageNumber, int itemsPerPage)
         {
-            var olderVersions = await historyDataService.GetDynamicContentHistoryAsync(templateId);
+            var olderVersions = await historyDataService.GetDynamicContentHistoryAsync(templateId, pageNumber, itemsPerPage);
 
             return olderVersions;
         }

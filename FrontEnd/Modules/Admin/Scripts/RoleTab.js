@@ -50,7 +50,7 @@ export class RoleTab {
                 url: `${this.base.settings.serviceRoot}/UPDATE_ENTITY_PROPERTY_PERMISSIONS?entityId=${encodeURIComponent(entity)}&roleId=${encodeURIComponent(role)}&permissionCode=${encodeURIComponent(permissionCode)}`,
                 method: "GET"
             });
-            
+
             this.base.showNotification("notification", `De wijzigingen zijn opgeslagen`, "success");
         }
         catch(exception) {
@@ -84,7 +84,7 @@ export class RoleTab {
     }
 
     /**
-     * Add or remove roles from the database based on the given parameters 
+     * Add or remove roles from the database based on the given parameters
      * @param {string} name The specified name of the role that must be added
      * @param {any} id The id of the role that must be deleted
      */
@@ -112,7 +112,7 @@ export class RoleTab {
         }
 
         try {
-            await Wiser.api({ 
+            await Wiser.api({
                 url: `${this.base.settings.serviceRoot}/${template}${Utils.toQueryString(data, true)}`,
                 method: "GET"
             });
@@ -400,24 +400,6 @@ export class RoleTab {
         });
     }
 
-    /**
-     * Check if a right checkbox has been checked otherwise the default is `all rights`
-     * @param {any} targetElement The checked checkbox element
-     */
-    checkRights(targetElement) {
-        const selectedRightsCount = targetElement.closest("tr").querySelectorAll("input:checked").length;
-
-        targetElement.closest("tr").querySelectorAll("input").forEach((element) => {
-            element.checked = false;
-        });
-
-        if (selectedRightsCount === 0) {
-            targetElement.closest("tr").querySelector("input").checked = true;
-        } else {
-            targetElement.checked = true;
-        }
-    }
-
     getSelectedTabName() {
         return this.rolesTabStrip.select().find(".k-link").text();
     }
@@ -479,5 +461,9 @@ export class RoleTab {
                 }
             }
         }).data("kendoListView");
+    }
+
+    hasChanges() {
+        return false;
     }
 }

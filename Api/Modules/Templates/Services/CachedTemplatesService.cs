@@ -67,10 +67,10 @@ namespace Api.Modules.Templates.Services
         public async Task<ServiceResult<string>> GetCssForHtmlEditorsAsync(ClaimsIdentity identity)
         {
             await databaseConnection.EnsureOpenConnectionForReadingAsync();
-            return await cache.GetOrAdd($"css_for_html_editors_{databaseConnection.GetDatabaseNameForCaching()}",
+            return await cache.GetOrAddAsync($"css_for_html_editors_{databaseConnection.GetDatabaseNameForCaching()}",
                 async cacheEntry =>
                 {
-                    cacheEntry.SlidingExpiration = gclSettings.DefaultTemplateCacheDuration;
+                    cacheEntry.AbsoluteExpirationRelativeToNow = gclSettings.DefaultTemplateCacheDuration;
                     return await templatesService.GetCssForHtmlEditorsAsync(identity);
                 }, cacheService.CreateMemoryCacheEntryOptions(CacheAreas.Templates));
         }
@@ -118,9 +118,15 @@ namespace Api.Modules.Templates.Services
         }
 
         /// <inheritdoc />
-        public async Task<ServiceResult<bool>> SaveTemplateVersionAsync(ClaimsIdentity identity, TemplateSettingsModel template, bool skipCompilation = false)
+        public async Task<ServiceResult<bool>> SaveAsync(ClaimsIdentity identity, TemplateSettingsModel template, bool skipCompilation = false)
         {
-            return await templatesService.SaveTemplateVersionAsync(identity, template, skipCompilation);
+            return await templatesService.SaveAsync(identity, template, skipCompilation);
+        }
+
+        /// <inheritdoc />
+        public async Task<ServiceResult<int>> CreateNewVersionAsync(int templateId, int versionBeingDeployed = 0)
+        {
+            return await templatesService.CreateNewVersionAsync(templateId, versionBeingDeployed);
         }
 
         /// <inheritdoc />
@@ -136,9 +142,9 @@ namespace Api.Modules.Templates.Services
         }
 
         /// <inheritdoc />
-        public async Task<ServiceResult<TemplateHistoryOverviewModel>> GetTemplateHistoryAsync(ClaimsIdentity identity, int templateId)
+        public async Task<ServiceResult<TemplateHistoryOverviewModel>> GetTemplateHistoryAsync(ClaimsIdentity identity, int templateId, int pageNumber, int itemsPerPage)
         {
-            return await templatesService.GetTemplateHistoryAsync(identity, templateId);
+            return await templatesService.GetTemplateHistoryAsync(identity, templateId, pageNumber, itemsPerPage);
         }
 
         /// <inheritdoc />
@@ -182,13 +188,13 @@ namespace Api.Modules.Templates.Services
         {
             return await templatesService.GeneratePreviewAsync(identity, requestModel);
         }
-        
+
         /// <inheritdoc />
         public async Task<ServiceResult<string>> CheckDefaultHeaderConflict(int templateId, string regexString)
         {
             return await templatesService.CheckDefaultHeaderConflict(templateId, regexString);
         }
-        
+
         /// <inheritdoc />
         public async Task<ServiceResult<string>> CheckDefaultFooterConflict(int templateId, string regexString)
         {

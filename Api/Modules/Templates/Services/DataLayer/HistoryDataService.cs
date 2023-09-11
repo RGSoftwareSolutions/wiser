@@ -27,11 +27,24 @@ namespace Api.Modules.Templates.Services.DataLayer
         }
 
         /// <inheritdoc />
-        public async Task<List<HistoryVersionModel>> GetDynamicContentHistoryAsync(int contentId)
+        public async Task<List<HistoryVersionModel>> GetDynamicContentHistoryAsync(int contentId, int page, int itemsPerPage)
         {
             connection.ClearParameters();
             connection.AddParameter("contentId", contentId);
-            var dataTable = await connection.GetAsync($"SELECT wdc.version, wdc.changed_on, wdc.changed_by, wdc.component, wdc.component_mode, wdc.settings FROM {WiserTableNames.WiserDynamicContent} wdc WHERE content_id = ?contentId ORDER BY wdc.version DESC");
+            connection.AddParameter("limit", (page - 1) * itemsPerPage);
+            connection.AddParameter("offset", itemsPerPage);
+
+            var dataTable = await connection.GetAsync($@"SELECT 
+    version,
+    changed_on,
+    changed_by,
+    component,
+    component_mode,
+    settings 
+FROM {WiserTableNames.WiserDynamicContent} 
+WHERE content_id = ?contentId 
+ORDER BY version DESC
+LIMIT ?limit, ?offset");
 
             var resultDict = new List<HistoryVersionModel>();
             foreach (DataRow row in dataTable.Rows)
@@ -55,7 +68,11 @@ namespace Api.Modules.Templates.Services.DataLayer
             var versionList = new Dictionary<int, int>();
 
             connection.AddParameter("id", templateId);
-            var dataTable = await connection.GetAsync($"SELECT wdc.version, wdc.published_environment FROM `{WiserTableNames.WiserDynamicContent}` wdc WHERE wdc.content_id = ?id");
+            var dataTable = await connection.GetAsync(@$"SELECT 
+    version,
+    published_environment 
+FROM {WiserTableNames.WiserDynamicContent}
+WHERE content_id = ?id");
 
             foreach (DataRow row in dataTable.Rows)
             {
@@ -66,10 +83,13 @@ namespace Api.Modules.Templates.Services.DataLayer
         }
 
         /// <inheritdoc />
-        public async Task<List<TemplateSettingsModel>> GetTemplateHistoryAsync(int templateId)
+        public async Task<List<TemplateSettingsModel>> GetTemplateHistoryAsync(int templateId, int page, int itemsPerPage)
         {
             connection.ClearParameters();
             connection.AddParameter("templateId", templateId);
+            connection.AddParameter("limit", (page - 1) * itemsPerPage);
+            connection.AddParameter("offset", itemsPerPage);;
+
             var dataTable = await connection.GetAsync($@"SELECT 
     template.template_id, 
     template.parent_id, 
@@ -79,7 +99,10 @@ namespace Api.Modules.Templates.Services.DataLayer
     template.version, 
     template.changed_on, 
     template.changed_by, 
-    template.use_cache,
+    template.cache_per_url,
+    template.cache_per_querystring,
+    template.cache_per_hostname,
+    template.cache_using_regex,
     template.cache_minutes, 
     template.cache_location, 
     template.cache_regex, 
@@ -118,7 +141,8 @@ LEFT JOIN (SELECT linkedTemplate.template_id, template_name, template_type FROM 
 WHERE template.template_id = ?templateId
 AND template.removed = 0
 GROUP BY template.version
-ORDER BY version DESC");
+ORDER BY version DESC
+LIMIT ?limit, ?offset");
 
             var resultList = new List<TemplateSettingsModel>();
 
@@ -134,7 +158,10 @@ ORDER BY version DESC");
                     Version = row.Field<int>("version"),
                     ChangedOn = row.Field<DateTime>("changed_on"),
                     ChangedBy = row.Field<string>("changed_by"),
-                    UseCache = (TemplateCachingModes)row.Field<int>("use_cache"),
+                    CachePerUrl = dataTable.Rows[0].Field<bool>("cache_per_url"),
+                    CachePerQueryString = dataTable.Rows[0].Field<bool>("cache_per_querystring"),
+                    CacheUsingRegex = dataTable.Rows[0].Field<bool>("cache_using_regex"),
+                    CachePerHostName = dataTable.Rows[0].Field<bool>("cache_per_hostname"),
                     CacheMinutes = row.Field<int>("cache_minutes"),
                     CacheLocation= (TemplateCachingLocations)row.Field<int>("cache_location"),
                     LoginRequired = Convert.ToBoolean(row["login_required"]),
@@ -170,7 +197,7 @@ ORDER BY version DESC");
                     WidgetContent = row.Field<string>("widget_content"),
                     WidgetLocation = (PageWidgetLocations) Convert.ToInt32(row["widget_location"])
                 };
-                
+
                 var loginRolesString = row.Field<string>("login_role");
                 if (!String.IsNullOrWhiteSpace(loginRolesString))
                 {
@@ -184,14 +211,37 @@ ORDER BY version DESC");
         }
 
         /// <inheritdoc />
-        public async Task<List<PublishHistoryModel>> GetPublishHistoryFromTemplateAsync(int templateId)
+        public async Task<List<PublishHistoryModel>> GetPublishHistoryFromTemplateAsync(int templateId, int page, int itemsPerPage)
         {
             connection.ClearParameters();
-            connection.AddParameter("templateid", templateId);
+            connection.AddParameter("templateId", templateId);
+            connection.AddParameter("limit", (page - 1) * itemsPerPage);
+            connection.AddParameter("offset", itemsPerPage);
 
-            var dataTable = await connection.GetAsync($@"SELECT publink.template_id, publink.old_live, publink.old_accept, publink.old_test, publink.new_live, publink.new_accept, publink.new_test, publink.changed_on, publink.changed_by
-                    FROM {WiserTableNames.WiserTemplatePublishLog} publink WHERE publink.template_id=?templateid ORDER BY publink.changed_on DESC"
-            );
+            var dataTable = await connection.GetAsync($@"SELECT MIN(changed_on), MAX(changed_on)
+INTO @minDate, @maxDate
+FROM (
+    SELECT template.id, template.changed_on FROM {WiserTableNames.WiserTemplate} AS template
+    WHERE template.template_id = ?templateId
+    AND template.removed = 0
+    ORDER BY template.version DESC
+    LIMIT ?limit, ?offset
+) AS t;
+										
+SELECT 
+    template_id,
+    old_live,
+    old_accept,
+    old_test,
+    new_live,
+    new_accept,
+    new_test,
+    changed_on,
+    changed_by
+FROM {WiserTableNames.WiserTemplatePublishLog} 
+WHERE template_id = ?templateId 
+AND changed_on BETWEEN @minDate AND @maxDate
+ORDER BY changed_on DESC");
 
             var resultList = new List<PublishHistoryModel>();
 

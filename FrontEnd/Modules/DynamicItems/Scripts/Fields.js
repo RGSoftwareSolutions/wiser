@@ -1,6 +1,6 @@
-﻿import {Dates, Wiser, Misc, Utils} from "../../Base/Scripts/Utils.js";
+﻿import {Dates, Misc, Utils, Wiser} from "../../Base/Scripts/Utils.js";
 import "../../Base/Scripts/Processing.js";
-import { DateTime } from "luxon";
+import {DateTime} from "luxon";
 
 require("@progress/kendo-ui/js/kendo.button.js");
 require("@progress/kendo-ui/js/kendo.dialog.js");
@@ -52,7 +52,7 @@ export class Fields {
             const fieldData = field.closest(".item").data() || {};
             let fieldName = fieldData.propertyName;
 
-            // If we have no name attribute, then it's not an element that we need to use. 
+            // If we have no name attribute, then it's not an element that we need to use.
             // It's probably a sub element of some Kendo component then.
             if (!field.attr("name") || field.hasClass("skip-when-saving")) {
                 return;
@@ -96,7 +96,7 @@ export class Fields {
                 results.push(extraData);
                 return;
             }
-            
+
             if (kendoControlName) {
                 let kendoControl = field.data(kendoControlName);
 
@@ -149,6 +149,13 @@ export class Fields {
                     switch ((field.attr("type") || "").toUpperCase()) {
                         case "CHECKBOX":
                             data.value = field.prop("checked");
+                            break;
+                        case "RADIO":
+                            // For radio buttons, only add the value if it's checked. Otherwise we'd get the value of all radio buttons.
+                            if (!field.prop("checked")) {
+                                return;
+                            }
+                            data.value = field.val();
                             break;
                         default:
                             data.value = field.val();
@@ -557,7 +564,7 @@ export class Fields {
         if (!fieldValue) {
             return;
         }
-		
+
         const urlToOpen = (fieldOptions.prefix || "") + fieldValue + (fieldOptions.suffix || "");
         if (fieldOptions.skipOpenUrlDialog) {
             window.open(urlToOpen);
@@ -587,8 +594,8 @@ export class Fields {
                     }
                 },
                 {
-                    text: "Open in een nieuw venster", 
-                    primary: true, 
+                    text: "Open in een nieuw venster",
+                    primary: true,
                     action: (kendoEvent) => {
                         window.open(urlToOpen);
                     }
@@ -653,7 +660,7 @@ export class Fields {
         event.sender.wrapper.find(`li[data-uid='${event.files[0].uid}'] .title`).html(kendo.htmlEncode(event.response[0].title || "(leeg)"));
         event.sender.wrapper.find(`li[data-uid='${event.files[0].uid}'] .fileContainer`).data("fileId", event.response[0].fileId).data("itemId", event.response[0].itemId);
         event.sender.wrapper.find(`li[data-uid='${event.files[0].uid}'] .name`).attr("href", `${this.base.settings.wiserApiRoot}items/${encodeURIComponent(event.response[0].itemId)}/files/${encodeURIComponent(event.response[0].fileId)}/${encodeURIComponent(event.response[0].name)}?itemLinkId=${event.response[0].itemLinkId || 0}&entityType=${encodeURIComponent(event.response[0].entityType || "")}&linkType=${event.response[0].linkType || 0}&encryptedCustomerId=${encodeURIComponent(this.base.settings.customerId)}&encryptedUserId=${encodeURIComponent(this.base.settings.userId)}&isTest=${this.base.settings.isTestEnvironment}&subDomain=${encodeURIComponent(this.base.settings.subDomain)}`);
-        let addedOn = (event.response[0].addedOn ? DateTime.fromISO(event.response[0].addedOn, { locale: "nl-NL" }) : DateTime.now()).toLocaleString(Dates.LongDateTimeFormat);
+        let addedOn = (event.response[0].addedOn ? DateTime.fromISO(event.response[0].addedOn, { locale: "nl-NL" }) : DateTime.fromJSDate(new Date(), { locale: "nl-NL" })).toLocaleString(Dates.LongDateTimeFormat);
         event.sender.wrapper.find(`li[data-uid='${event.files[0].uid}'] .fileDate`).html(kendo.htmlEncode(addedOn));
         event.sender.wrapper.find(".editTitle").click(this.onUploaderEditTitleClick.bind(this));
         event.sender.wrapper.find(".editName").click(this.onUploaderEditNameClick.bind(this));
@@ -746,7 +753,7 @@ export class Fields {
         const container = $(event.currentTarget).closest(".fileContainer");
         const containerData = container.data();
         const value = await kendo.prompt("", containerData.name);
-        
+
         await Wiser.api({
             url: `${this.base.settings.wiserApiRoot}items/${encodeURIComponent(containerData.itemId)}/files/${encodeURIComponent(containerData.fileId)}/rename/${encodeURIComponent(value)}?itemLinkId=${encodeURIComponent(containerData.itemLinkId || 0)}&entityType=${encodeURIComponent(containerData.entityType || "")}&linkType=${containerData.linkType || 0}`,
             method: "PUT",
@@ -884,7 +891,7 @@ export class Fields {
             // Try to determine the entity type. If this button is located within a window, that window element
             // might have the entity type set as one of its data properties.
             let entityType;
-            const window = event.sender.element.closest("div.k-window-content");
+            const window = event.sender.element.closest("div.entity-container");
             if (window) {
                 entityType = window.data("entityType");
                 if (!entityType && window.data("entityTypeDetails")) {
@@ -1063,10 +1070,10 @@ export class Fields {
             if (!this.base.allLanguages || !this.base.allLanguages.length) {
                 const clone = altTextTemplateElement.clone(true);
                 clone.removeClass("hidden").removeClass("alt-text-template").addClass("alt-text");
-                
+
                 const cloneLabel = clone.find("label");
                 cloneLabel.attr("for", `${cloneLabel.attr("for")}General`);
-                
+
                 const cloneInput = clone.find("input");
                 cloneInput.attr("name", "altText_general");
                 cloneInput.attr("id", `${cloneInput.attr("id")}General`);
@@ -1091,7 +1098,7 @@ export class Fields {
                     dialogElement.find(".formview").append(clone);
                 }
             }
-            
+
             if (changeImageDataDialog) {
                 changeImageDataDialog.destroy();
             }
@@ -1236,7 +1243,7 @@ export class Fields {
      * @param {any} mainItemDetails The details of the main item that contains the action button.
      * @param {number} propertyId The ID of the property/field that contains the action button.
      * @param {Array<any>} selectedItems Optional: If the action button is part of a grid, this parameter should contain all the selected items of that grid, so that the actions will be executed for all those items.
-     * @returns {boolean} Whether the actions were all successful or not. 
+     * @returns {boolean} Whether the actions were all successful or not.
      * @param {any} element The action button or grid.
      */
     async executeActionButtonActions(actions, userParametersWithValues, mainItemDetails, propertyId, selectedItems = [], element = null) {
@@ -1255,7 +1262,23 @@ export class Fields {
             return suffixToUse;
         };
 
+        /**
+         * Remove any properties from the previous item so that we don't get confusing conflicts.
+         */
+        function cleanupUserParameters() {
+            if (!userParametersWithValues) {
+                return;
+            }
+
+            for (let key in userParametersWithValues) {
+                if (userParametersWithValues.hasOwnProperty(key) && key.indexOf("selected_") === 0) {
+                    delete userParametersWithValues[key];
+                }
+            }
+        }
+
         let queryActionResult;
+
         for (let index = 0; index < actions.length; index++) {
             const action = actions[index];
             var exception;
@@ -1287,7 +1310,7 @@ export class Fields {
 
                             let dialog;
 
-                            // Function for when the user clicks the OK button in a dialog for a user variable. 
+                            // Function for when the user clicks the OK button in a dialog for a user variable.
                             // It will get the value from the correct kendo component and return it in a Promise.
                             const okButtonAction = (parameter, event) => {
                                 let value = dialog.element.find("input").val();
@@ -1407,7 +1430,7 @@ export class Fields {
                                 width: width,
                                 height: height,
                                 open: (event) => {
-                                    setTimeout(() => { 
+                                    setTimeout(() => {
                                         event.sender.element.find("input:visible, textarea:visible").focus();
                                         if (parameter.fieldType === "grid") {
                                             $("#gridUserParameter").data("kendoGrid").resize();
@@ -1443,7 +1466,7 @@ export class Fields {
                                                 if (!item.dataItem.hasOwnProperty(key) || (typeof item.dataItem[key] === "object" && !(item.dataItem[key] || {}).getDate)) {
                                                     continue;
                                                 }
-                                                
+
                                                 extraData[`selected_${key}`] = (item.dataItem[key] || {}).getDate ? DateTime.fromJSDate(item.dataItem[key], { locale: "nl-NL" }).toFormat("yyyy-LL-dd HH:mm:ss") : item.dataItem[key];
                                             }
                                         }
@@ -1575,12 +1598,7 @@ export class Fields {
                                     }
                                     // We have an array with selected items, which means this is an action button in a grid and we want to execute this action once for every selected item.
                                     for (let item of selectedItems) {
-                                        // Remove any properties from the previous item so that we don't get confusing conflicts.
-                                        for (let key in userParametersWithValues) {
-                                            if (item.dataItem.hasOwnProperty(key) && key.indexOf("selected_") === 0) {
-                                                delete userParametersWithValues[key];
-                                            }
-                                        }
+                                        cleanupUserParameters();
 
                                         // If there is a certain column selected, use only values with the same suffix, that makes it possible to execute action buttons on specific columns instead of an entire row.
                                         const suffixToUse = getSuffixFromSelectedColumn(item);
@@ -1600,7 +1618,7 @@ export class Fields {
                                             if (suffixToUse) {
                                                 newKey = newKey.substr(0, newKey.length - suffixToUse.length - 1);
                                             }
-                                            
+
                                             userParametersWithValues[`selected_${newKey}`] = (item.dataItem[key] || {}).getDate ? DateTime.fromJSDate(item.dataItem[key], { locale: "nl-NL" }).toFormat("yyyy-LL-dd HH:mm:ss") : item.dataItem[key];
                                         }
                                     }
@@ -1783,6 +1801,9 @@ export class Fields {
                         }
 
                         if (userParametersWithValues) {
+
+                            cleanupUserParameters();
+
                             for (const parameter in userParametersWithValues) {
                                 if (!userParametersWithValues.hasOwnProperty(parameter)) {
                                     continue;
@@ -1802,6 +1823,8 @@ export class Fields {
                         }
 
                         for (let selectedItem of selectedItems) {
+                            cleanupUserParameters();
+
                             // If there is a certain column selected, use only values with the same suffix, that makes it possible to execute action buttons on specific columns instead of an entire row.
                             const suffixToUse = getSuffixFromSelectedColumn(selectedItem);
 
@@ -1831,7 +1854,7 @@ export class Fields {
                         break;
                     }
 
-                    // Opens a new tab/window in the browser of the user with the given URL. If multiple 
+                    // Opens a new tab/window in the browser of the user with the given URL. If multiple
                     case "openUrlOnce": {
                         if (!action.url) {
                             kendo.alert(`Er werd geprobeerd om actie type '${action.type}' uit te voeren, echter is er geen URL ingevuld. Neem a.u.b. contact op met ons.`);
@@ -1885,12 +1908,7 @@ export class Fields {
                                 // If there is a certain column selected, use only values with the same suffix, that makes it possible to execute action buttons on specific columns instead of an entire row.
                                 const suffixToUse = getSuffixFromSelectedColumn(item);
 
-                                // Remove any properties from the previous item so that we don't get confusing conflicts.
-                                for (let key in userParametersWithValues) {
-                                    if (item.dataItem.hasOwnProperty(key) && key.indexOf("selected_") === 0) {
-                                        delete userParametersWithValues[key];
-                                    }
-                                }
+                                cleanupUserParameters();
 
                                 // Enter the values of all properties in userParametersWithValues, so that they can be used in actions.
                                 for (let key in item.dataItem) {
@@ -1955,9 +1973,9 @@ export class Fields {
 
                         // The queryActionResult are from a previously executed query. This way you can combine the actions executeQuery(Once) and openWindow to open a newly created or updated item.
                         if (queryActionResult) {
-                            windowItemId = windowItemId.replace(/{itemId}/gi, queryActionResult.itemId || 0);
-                            windowLinkId = windowLinkId.replace(/{linkId}/gi, queryActionResult.linkId || 0);
-                            windowLinkType = windowLinkType.replace(/{linkType}/gi, queryActionResult.linkType || queryActionResult.linkTypeNumber || 0);
+                            windowItemId = windowItemId.toString().replace(/{itemId}/gi, queryActionResult.itemId || 0);
+                            windowLinkId = windowLinkId.toString().replace(/{linkId}/gi, queryActionResult.linkId || 0);
+                            windowLinkType = windowLinkType.toString().replace(/{linkType}/gi, queryActionResult.linkType || queryActionResult.linkTypeNumber || 0);
                         }
                         windowItemId = Wiser.doWiserItemReplacements(windowItemId, mainItemDetails);
 
@@ -2117,7 +2135,7 @@ export class Fields {
                             }
                         }
 
-                        await this.initializeGenerateFileWindow(allUrls, templateDetails, emailData, action, element, userParametersWithValues, itemId, linkId, propertyId, selectedItems);
+                        await this.initializeGenerateFileWindow(allUrls, templateDetails, emailData, action, element, userParametersWithValues, itemId, linkId, propertyId, selectedItems, mainItemDetails);
 
                         break;
                     }
@@ -2153,12 +2171,7 @@ export class Fields {
                                 // If there is a certain column selected, use only values with the same suffix, that makes it possible to execute action buttons on specific columns instead of an entire row.
                                 const suffixToUse = getSuffixFromSelectedColumn(item);
 
-                                // Remove any properties from the previous item so that we don't get confusing conflicts.
-                                for (let key in userParametersWithValues) {
-                                    if (item.dataItem.hasOwnProperty(key) && key.indexOf("selected_") === 0) {
-                                        delete userParametersWithValues[key];
-                                    }
-                                }
+                                cleanupUserParameters();
 
                                 // Enter the values of all properties in userParametersWithValues, so that they can be used in actions.
                                 for (let key in item.dataItem) {
@@ -2175,7 +2188,7 @@ export class Fields {
                                     if (suffixToUse) {
                                         newKey = newKey.substr(0, newKey.length - suffixToUse.length - 1);
                                     }
-                                    
+
                                     userParametersWithValues[`selected_${newKey}`] = (item.dataItem[key] || {}).getDate ? DateTime.fromJSDate(item.dataItem[key], { locale: "nl-NL" }).toFormat("yyyy-LL-dd HH:mm:ss") : item.dataItem[key];
                                 }
 
@@ -2284,6 +2297,15 @@ export class Fields {
                         break;
                     }
 
+                    case "actionConfirmDialog": {
+                        try {
+                            await Wiser.showConfirmDialog(action.text || "Wilt u doorgaan met de actie?", action.title || "Doorgaan", "Annuleren", "Doorgaan");
+                            break;
+                        } catch {
+                            return false;
+                        }
+                    }
+
                     // Custom actions with custom javascript.
                     case "custom": {
                         // Custom actions use custom javascript that is already executed while loading the field, so no need to do anything here.
@@ -2318,15 +2340,16 @@ export class Fields {
      * @param {Array} urls The URLs of the data selector.
      * @param {any} templateDetails The details of the template.
      * @param {any} emailData An object that contains the default subject, receiver and body for the e-mail to send.
-     * @param {any} action An object that contains the setting for the current action. 
+     * @param {any} action An object that contains the setting for the current action.
      * @param {any} element The action button or grid.
      * @param {any} userParametersWithValues The user parameters of the action button.
      * @param {any} itemId The ID of the opened/selected item.
      * @param {any} linkId The item link ID of the opened/selected item.
-     * @param {any} propertyId The ID of the property / field that contains the action button. 
+     * @param {any} propertyId The ID of the property / field that contains the action button.
      * @param {any} selectedItems Array of all selected items in the grid.
+     * @param {any} mainItemDetails The details of the item from which this window is being opened.
      */
-    initializeGenerateFileWindow(urls, templateDetails, emailData = {}, action = {}, element = null, userParametersWithValues = {}, itemId = null, linkId = null, propertyId = 0, selectedItems = []) {
+    initializeGenerateFileWindow(urls, templateDetails, emailData = {}, action = {}, element = null, userParametersWithValues = {}, itemId = null, linkId = null, propertyId = 0, selectedItems = [], mainItemDetails = {}) {
         return new Promise(async (resolve, reject) => {
             emailData = emailData || {};
 
@@ -2334,6 +2357,11 @@ export class Fields {
                 kendo.alert("Deze functionaliteit is nog niet volledig ingesteld ('contentPropertyName' is leeg). Neem a.u.b. contact op met ons.");
                 resolve();
                 return;
+            }
+
+            let itemDetails = mainItemDetails;
+            if (selectedItems.length > 0 && selectedItems[0].dataItem) {
+                itemDetails = (await this.base.getItemDetails(selectedItems[0].dataItem.encrypted_id || selectedItems[0].dataItem.encryptedid || selectedItems[0].dataItem.encryptedId, selectedItems[0].dataItem.entity_type || selectedItems[0].dataItem.entitytype || selectedItems[0].dataItem.entityType)) || mainItemDetails;
             }
 
             const process = `initializeGenerateFileWindow_${Date.now()}`;
@@ -2371,12 +2399,12 @@ export class Fields {
                 previewWindow.one("close", (event) => resolve());
 
                 const container = previewWindow.element.find("div.k-content-frame");
-                console.log("container", container);
 
                 // Save the email data in the container, otherwise the email popup will show out dated data after opening it for a second time.
                 container.data("emailData", emailData);
                 container.data("action", action);
                 container.data("templateDetails", templateDetails);
+                container.data("itemDetails", itemDetails);
 
                 // Initialize the tab strip.
                 const tabStripElement = container.find("#previewTabStrip");
@@ -2506,6 +2534,7 @@ export class Fields {
                             const currentTemplateDetails = container.data("templateDetails");
                             const currentAction = container.data("action");
                             const kendoEditor = selectedTabContainer.find(".editor").data("kendoEditor");
+                            const currentItemDetails = container.data("itemDetails");
                             const pdfToHtmlData = {
                                 html: kendo.htmlEncode(kendoEditor.value()),
                                 backgroundPropertyName: currentAction.pdfBackgroundPropertyName || "",
@@ -2513,7 +2542,7 @@ export class Fields {
                             };
 
                             if (currentAction.pdfFilename) {
-                                pdfToHtmlData.fileName = currentAction.pdfFilename.replace("{itemId}", currentTemplateDetails.id);
+                                pdfToHtmlData.fileName = Wiser.doWiserItemReplacements(currentAction.pdfFilename, currentItemDetails);
                             }
 
                             pdfToHtmlData.documentOptions = "";
@@ -2569,11 +2598,13 @@ export class Fields {
                                 const dialogElement = $("#sendMailDialog");
                                 const validator = dialogElement.find(".formview").kendoValidator().data("kendoValidator");
                                 let mailDialog = dialogElement.data("kendoDialog");
+                                const uploadedFiles = [];
 
                                 // Set the initial values from the query.
                                 const currentEmailData = container.data("emailData");
                                 const currentAction = container.data("action");
                                 const currentTemplateDetails = container.data("templateDetails");
+                                const currentItemDetails = container.data("itemDetails");
                                 dialogElement.find("input[name=senderName]").val(currentEmailData.senderName);
                                 dialogElement.find("input[name=senderEmail]").val(currentEmailData.senderEmail);
                                 dialogElement.find("input[name=receiverName]").val(currentEmailData.receiverName);
@@ -2620,29 +2651,32 @@ export class Fields {
                                                 const allEditors = container.find(".editor");
                                                 for (let index = 0; index < allEditors.length; index++) {
                                                     const kendoEditor = $(allEditors[index]).data("kendoEditor");
+                                                    const pdfToHtmlData = {
+                                                        html: $("<div/>").text(kendoEditor.value()).html(), // alternative htmlEncode, because kendo.htmlEncode makes from a single quote &#039; (which goes wrong when posted to URL)
+                                                        backgroundPropertyName: currentAction.pdfBackgroundPropertyName || "",
+                                                        documentOptions: documentOptions,
+                                                        itemId: currentTemplateDetails.id,
+                                                        saveInDatabase: true
+                                                    };
+
+                                                    if (currentAction.pdfFilename) {
+                                                        pdfToHtmlData.fileName = Wiser.doWiserItemReplacements(currentAction.pdfFilename, currentItemDetails);
+                                                    }
+
                                                     let ajaxOptions = {
                                                         url: `${this.base.settings.wiserApiRoot}pdf/save-html-as-pdf`,
                                                         method: "POST",
                                                         contentType: "application/json",
-                                                        data: json.stringify({
-                                                            html: $("<div/>").text(kendoEditor.value()).html(), // alternative htmlEncode, because kendo.htmlEncode makes from a single quote &#039; (which goes wrong when posted to URL)
-                                                            backgroundPropertyName: currentAction.pdfBackgroundPropertyName || "",
-                                                            documentOptions: documentOptions,
-                                                            itemId: currentTemplateDetails.id,
-                                                            saveInDatabase: true
-                                                        })
+                                                        data: JSON.stringify(pdfToHtmlData)
                                                     };
                                                     promises.push(Wiser.api(ajaxOptions));
                                                 }
 
-                                                Promise.all(promises).catch((error) => {
-                                                    console.error(error);
-                                                    loader.removeClass("loading");
-                                                    kendo.alert("Er is iets fout gegaan met het genereren van de PDF. Probeer het a.u.b. nogmaals of neem contact op met ons");
-                                                }).then((results) => {
-                                                    const allFiles = dialogElement.find("input[name=files]").data("kendoUpload").getFiles();
-                                                    const wiserFileAttachments = allFiles.filter(file => file.fileId > 0).map(file => file.fileId) || [];
-                                                
+                                                Promise.all(promises).then((results) => {
+                                                    const uploadElement = dialogElement.find("input[name=files]");
+                                                    const allFiles = uploadElement.data("kendoUpload").getFiles();
+                                                    const wiserFileAttachments = uploadedFiles.map(file => file.fileId) || [];
+
                                                     for (let fileId of results) {
                                                         wiserFileAttachments.push(parseInt(fileId.replace(/\"/g, "")));
                                                     }
@@ -2672,7 +2706,7 @@ export class Fields {
                                                         for (let selectedItem of selectedItems) {
                                                             queryPromises.push(Wiser.api({
                                                                 method: "POST",
-                                                                url: `${this.base.settings.wiserApiRoot}items/${encodeURIComponent(selectedItem.dataItem.encryptedId)}/action-button/${propertyId}?queryId=${encodeURIComponent(action.executeQueryAfterEmail)}&itemLinkId=${encodeURIComponent(selectedItem.dataItem.linkId)}`,
+                                                                url: `${this.base.settings.wiserApiRoot}items/${encodeURIComponent(selectedItem.dataItem.encryptedId || selectedItem.dataItem.encrypted_id)}/action-button/${propertyId}?queryId=${encodeURIComponent(action.executeQueryAfterEmail)}&itemLinkId=${encodeURIComponent(selectedItem.dataItem.linkId || selectedItem.dataItem.link_id || 0)}`,
                                                                 data: JSON.stringify(userParametersWithValues),
                                                                 contentType: "application/json"
                                                             }));
@@ -2687,6 +2721,9 @@ export class Fields {
                                                         });
                                                     };
 
+                                                    const cc = mailDialog.element.find("input[name=cc]").val();
+                                                    const bcc = mailDialog.element.find("input[name=bcc]").val();
+
                                                     Wiser.api({
                                                         url: `${this.base.settings.wiserApiRoot}communications/email`,
                                                         method: "POST",
@@ -2698,8 +2735,8 @@ export class Fields {
                                                                 displayName: mailDialog.element.find("input[name=receiverName]").val(),
                                                                 address: mailDialog.element.find("input[name=receiverEmail]").val(),
                                                             }],
-                                                            cc: [mailDialog.element.find("input[name=cc]").val()],
-                                                            bcc: [mailDialog.element.find("input[name=bcc]").val()],
+                                                            cc: cc ? [cc] : null,
+                                                            bcc: bcc ? [bcc] : null,
                                                             subject: mailDialog.element.find("input[name=subject]").val(),
                                                             wiserItemFiles: wiserFileAttachments,
                                                             content: emailBodyEditor.value()
@@ -2712,6 +2749,10 @@ export class Fields {
                                                     }).then((mailResult) => {
                                                         afterMail();
                                                     });
+                                                }).catch((error) => {
+                                                    console.error(error);
+                                                    loader.removeClass("loading");
+                                                    kendo.alert("Er is iets fout gegaan met het genereren van de PDF. Probeer het a.u.b. nogmaals of neem contact op met ons");
                                                 });
 
                                                 return false;
@@ -2731,15 +2772,37 @@ export class Fields {
                                 }
 
                                 let files = [];
-                                if (currentAction.emailDefaultAttachmentsPropertyName) {
-                                    const initialFilesJson = currentTemplateDetails.property_[currentAction.emailDefaultAttachmentsPropertyName] || "[]";
+                                if (currentAction.emailDefaultAttachmentsPropertyName && currentTemplateDetails.details && currentTemplateDetails.details.length > 0) {
+                                    const initialFilesJson = currentTemplateDetails.details.find(detail => detail.key === currentAction.emailDefaultAttachmentsPropertyName) || "[]";
                                     files = JSON.parse(initialFilesJson);
                                 }
 
                                 // Always re-create the upload widget because it's not possible to add files to programmatically a widget after it's been initialized, without using weird hacks.
                                 attachmentsUploader = dialogElement.find("input[name=files]").kendoUpload({
                                     files: files,
-                                    enabled: false
+                                    async: {
+                                        saveUrl: `${this.base.settings.wiserApiRoot}items/${encodeURIComponent(itemId)}/upload?propertyName=TEMPORARY_FILE_FROM_WISER`,
+                                        removeUrl: "remove", // TODO
+                                        withCredentials: false
+                                    },
+                                    multiple: true,
+                                    upload: (e) => {
+                                        let xhr = e.XMLHttpRequest;
+                                        if (xhr) {
+                                            xhr.addEventListener("readystatechange", (e) => {
+                                                if (xhr.readyState === 1 /* OPENED */) {
+                                                    xhr.setRequestHeader("authorization", `Bearer ${localStorage.getItem("accessToken")}`);
+                                                }
+                                            });
+                                        }
+                                    },
+                                    success: (uploadSuccessEvent) => {
+                                        if (uploadSuccessEvent.operation !== "upload") {
+                                            return;
+                                        }
+
+                                        uploadedFiles.push(...uploadSuccessEvent.response);
+                                    }
                                 }).data("kendoUpload");
 
                                 // Initialize the kendo HTML editor.
@@ -2753,7 +2816,7 @@ export class Fields {
                                     parent.append(textArea);
                                     parent.find("table.k-editor").remove();
                                 }
-                            
+
                                 await require("@progress/kendo-ui/js/kendo.editor.js");
                                 emailBodyEditor = dialogElement.find("textarea.editor").kendoEditor({
                                     tools: [
@@ -2885,7 +2948,7 @@ export class Fields {
         const textArea = htmlWindow.find("textarea").val(editor.value());
         // Prettify code from minified text.
         const pretty = await require('pretty');
-        textArea[0].value = pretty(textArea[0].value, { 
+        textArea[0].value = pretty(textArea[0].value, {
             ocd: false,
             indent_size: 4,
             unformatted: [],
@@ -2913,7 +2976,7 @@ export class Fields {
                     },
                     mode: "text/html"
                 };
-                
+
                 // Only load code mirror when we actually need it.
                 await Misc.ensureCodeMirror();
                 codeMirrorInstance = CodeMirror.fromTextArea(textArea[0], codeMirrorSettings);
@@ -2990,7 +3053,7 @@ export class Fields {
 
         htmlWindow.find(".k-primary, .k-button-solid-primary").kendoButton({
             click: () => {
-                const html = typeof(iframe[0].contentWindow.main.vueApp.contentBox) === "undefined" 
+                const html = typeof(iframe[0].contentWindow.main.vueApp.contentBox) === "undefined"
                     ? iframe[0].contentWindow.main.vueApp.contentBuilder.html()
                     : iframe[0].contentWindow.main.vueApp.contentBox.html();
                 editor.value(html);
@@ -3058,7 +3121,7 @@ export class Fields {
                 options.tools.splice(maximizeButtonIndex, 1, minimizeTool);
             }
         }
-        
+
         await require("@progress/kendo-ui/js/kendo.editor.js");
         windowKendoEditor = textArea.kendoEditor(options).data("kendoEditor");
     }
@@ -3095,11 +3158,11 @@ export class Fields {
         try {
             const dialogElement = $("#dataSelectorTemplateDialog");
             let dataSelectorTemplateDialog = dialogElement.data("kendoDialog");
-                        
+
             if (dataSelectorTemplateDialog) {
                 dataSelectorTemplateDialog.destroy();
             }
-            
+
             const dataSelectorDropDown = dialogElement.find("#dataSelectorDropDown").kendoDropDownList({
                 optionLabel: "Selecteer data selector",
                 dataTextField: "name",
@@ -3222,12 +3285,12 @@ export class Fields {
                                 kendo.alert("Vul a.u.b. een video-ID, hoogte en breedte in.")
                                 return false;
                             }
-                            
+
                             const queryString = {
                                 rel: dialogElement.find("#youTubeShowRelatedVideos").prop("checked"),
                                 autoplay: dialogElement.find("#youTubeAutoPlay").prop("checked")
                             };
-                            
+
                             let fullScreenAttribute = "";
                             if (dialogElement.find("#youTubeAllowFullScreen").prop("checked")) {
                                 fullScreenAttribute = 'allowfullscreen="allowfullscreen"';
@@ -3338,7 +3401,7 @@ export class Fields {
     }
 
     /**
-     * Event that gets called when the Kendo editor serializes it's contents. 
+     * Event that gets called when the Kendo editor serializes it's contents.
      * @param html The HTML contents of the editor.
      * @returns {*} The HTML contents of the editor.
      */

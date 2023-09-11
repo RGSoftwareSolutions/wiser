@@ -1,58 +1,62 @@
-﻿import { createStore } from "vuex";
+﻿import {createStore} from "vuex";
 import {
-    START_REQUEST,
-    END_REQUEST,
-    AUTH_REQUEST,
-    AUTH_LIST,
-    AUTH_SUCCESS,
-    AUTH_ERROR,
-    AUTH_LOGOUT,
-    AUTH_TOTP_SETUP,
-    AUTH_TOTP_PIN,
-    MODULES_LOADED,
-    OPEN_MODULE,
     ACTIVATE_MODULE,
-    CLOSE_MODULE,
-    CLOSE_ALL_MODULES,
-    MODULES_REQUEST,
-    LOAD_ENTITY_TYPES_OF_ITEM_ID,
-    FORGOT_PASSWORD,
-    RESET_PASSWORD_SUCCESS,
-    RESET_PASSWORD_ERROR,
+    AUTH_ERROR,
+    AUTH_LIST,
+    AUTH_LOGOUT,
+    AUTH_REQUEST,
+    AUTH_SUCCESS,
+    AUTH_TOTP_PIN,
+    AUTH_TOTP_SETUP,
     CHANGE_PASSWORD,
+    CHANGE_PASSWORD_ERROR,
     CHANGE_PASSWORD_LOGIN,
     CHANGE_PASSWORD_SUCCESS,
-    CHANGE_PASSWORD_ERROR,
-    GET_CUSTOMER_TITLE,
-    VALID_SUB_DOMAIN,
-    TOGGLE_PIN_MODULE,
+    CLEAR_ACTIVE_TIMER_INTERVAL,
+    CLEAR_CACHE,
+    CLEAR_CACHE_ERROR,
+    CLEAR_CACHE_SUCCESS,
+    CLEAR_LOCAL_TOTP_BACKUP_CODES,
+    CLOSE_ALL_MODULES,
+    CLOSE_MODULE,
     CREATE_BRANCH,
-    CREATE_BRANCH_SUCCESS,
     CREATE_BRANCH_ERROR,
+    CREATE_BRANCH_SUCCESS,
+    DELETE_BRANCH,
+    DELETE_BRANCH_ERROR,
+    DELETE_BRANCH_SUCCESS,
+    END_REQUEST,
+    FORGOT_PASSWORD,
+    GENERATE_TOTP_BACKUP_CODES,
+    GENERATE_TOTP_BACKUP_CODES_ERROR,
+    GENERATE_TOTP_BACKUP_CODES_SUCCESS,
+    GET_BRANCH_CHANGES,
     GET_BRANCHES,
+    GET_CUSTOMER_TITLE,
+    GET_DATA_SELECTORS_FOR_BRANCHES,
+    GET_ENTITIES_FOR_BRANCHES,
+    HANDLE_CONFLICT,
+    HANDLE_MULTIPLE_CONFLICTS,
+    IS_MAIN_BRANCH,
+    LOAD_ENTITY_TYPES_OF_ITEM_ID,
     MERGE_BRANCH,
     MERGE_BRANCH_ERROR,
     MERGE_BRANCH_SUCCESS,
-    GET_ENTITIES_FOR_BRANCHES,
-    IS_MAIN_BRANCH,
-    GET_BRANCH_CHANGES,
-    HANDLE_CONFLICT,
-    HANDLE_MULTIPLE_CONFLICTS,
-    CLEAR_CACHE,
-    CLEAR_CACHE_SUCCESS,
-    CLEAR_CACHE_ERROR,
+    MODULES_LOADED,
+    MODULES_REQUEST,
+    OPEN_MODULE,
+    RESET_PASSWORD_ERROR,
+    RESET_PASSWORD_SUCCESS,
+    SET_ACTIVE_TIMER_INTERVAL,
+    START_REQUEST,
     START_UPDATE_TIME_ACTIVE_TIMER,
     STOP_UPDATE_TIME_ACTIVE_TIMER,
-    SET_ACTIVE_TIMER_INTERVAL,
-    CLEAR_ACTIVE_TIMER_INTERVAL,
+    TOGGLE_PIN_MODULE,
     UPDATE_ACTIVE_TIME,
-    GENERATE_TOTP_BACKUP_CODES,
-    GENERATE_TOTP_BACKUP_CODES_SUCCESS,
-    GENERATE_TOTP_BACKUP_CODES_ERROR,
-    CLEAR_LOCAL_TOTP_BACKUP_CODES,
     USE_TOTP_BACKUP_CODE,
     USE_TOTP_BACKUP_CODE_ERROR,
-    USER_BACKUP_CODES_GENERATED
+    USER_BACKUP_CODES_GENERATED,
+    VALID_SUB_DOMAIN
 } from "./mutation-types";
 
 const baseModule = {
@@ -107,7 +111,7 @@ const loginModule = {
             else {
                 state.loginStatus = "loading";
             }
-            
+
             state.loginMessage = "";
             state.listOfUsers = [];
         },
@@ -197,12 +201,11 @@ const loginModule = {
     },
 
     actions: {
-        async [AUTH_REQUEST]({ commit }, data = {}) {
+        async [AUTH_REQUEST]({ commit, rootState }, data = {}) {
             const user = data.user;
             commit(AUTH_REQUEST, user);
 
             // Check if we have user data in the local storage and if that data is still valid.
-            let startUpdateTimeActiveTimer = false;
             if (!user) {
                 const accessTokenExpires = localStorage.getItem("accessTokenExpiresOn");
 
@@ -224,8 +227,6 @@ const loginModule = {
                     localStorage.setItem("accessToken", loginResult.data.access_token);
                     localStorage.setItem("accessTokenExpiresOn", loginResult.data.expiresOn);
                     localStorage.setItem("userData", JSON.stringify(Object.assign({}, user, loginResult.data)));
-
-                    startUpdateTimeActiveTimer = true;
                 }
 
                 window.main.api.defaults.headers.common["Authorization"] = `Bearer ${localStorage.getItem("accessToken")}`;
@@ -239,11 +240,13 @@ const loginModule = {
 
                 commit(AUTH_SUCCESS, user);
 
-                await this.dispatch(MODULES_REQUEST);
+                if (!rootState.modules.allModules || !rootState.modules.allModules.length) {
+                    await this.dispatch(MODULES_REQUEST);
+                }
 
                 // If a login log ID is also set in the user data, use it to start the "time active" timer.
-                if (startUpdateTimeActiveTimer && user.hasOwnProperty("encryptedLoginLogId")) {
-                    await main.usersService.startUpdateTimeActiveTimer();
+                if (!rootState.users.updateTimeActiveTimerWorking && user.hasOwnProperty("encryptedLoginLogId")) {
+                    await this.dispatch(START_UPDATE_TIME_ACTIVE_TIMER);
                 }
 
                 return;
@@ -251,19 +254,19 @@ const loginModule = {
 
             const loginResult = await main.usersService.loginUser(user.username, user.password, (user.selectedUser || {}).username, user.totpPin, user.totpBackupCode);
             if (!loginResult.success) {
-                commit(AUTH_ERROR, { 
-                    message: loginResult.message, 
+                commit(AUTH_ERROR, {
+                    message: loginResult.message,
                     isTotpError: data.loginStatus === "totp"
                 });
                 return;
             }
-            
+
             // If TOTP is enabled and not succeeded yet, show the 2FA step.
             if (loginResult.data.totpEnabled && !loginResult.data.totpSuccess) {
                 commit(loginResult.data.totpQrImageUrl ? AUTH_TOTP_SETUP : AUTH_TOTP_PIN, loginResult.data);
                 return;
             }
-            
+
             // If the user that is logging in is an admin account, show a list of users for the customer.
             if (loginResult.data.adminLogin && !loginResult.data.adminAccountId) {
                 commit(AUTH_LIST, loginResult.data.usersList);
@@ -286,7 +289,14 @@ const loginModule = {
 
             commit(AUTH_SUCCESS, loginResult.data);
 
-            await this.dispatch(MODULES_REQUEST);
+            if (!rootState.modules.allModules || !rootState.modules.allModules.length) {
+                await this.dispatch(MODULES_REQUEST);
+            }
+
+            // If a login log ID is also set in the user data, use it to start the "time active" timer.
+            if (!rootState.users.updateTimeActiveTimerWorking && user.hasOwnProperty("encryptedLoginLogId")) {
+                await this.dispatch(START_UPDATE_TIME_ACTIVE_TIMER);
+            }
         },
 
         [AUTH_LOGOUT]({ commit }) {
@@ -295,6 +305,7 @@ const loginModule = {
             localStorage.removeItem("userData");
             sessionStorage.removeItem("userSettings");
             delete window.main.api.defaults.headers.common["Authorization"];
+            this.dispatch(STOP_UPDATE_TIME_ACTIVE_TIMER);
 
             commit(AUTH_LOGOUT);
         },
@@ -321,7 +332,7 @@ const loginModule = {
                 commit(CHANGE_PASSWORD_ERROR, result.error);
             }
         },
-        
+
         async [USE_TOTP_BACKUP_CODE]({ commit }, data = {}) {
             commit(USE_TOTP_BACKUP_CODE);
 
@@ -333,7 +344,7 @@ const loginModule = {
                 commit(CHANGE_PASSWORD_ERROR, result.message);
             }
         },
-        
+
         [USER_BACKUP_CODES_GENERATED]({ commit }) {
             commit(USER_BACKUP_CODES_GENERATED);
             const localUser = JSON.parse(localStorage.getItem("userData"));
@@ -397,7 +408,7 @@ const modulesModule = {
                 if (document.body.classList.contains("on-canvas")) {
                     document.body.classList.add("menu-active");
                     document.body.classList.remove("on-canvas");
-                }            
+                }
             } else {
                 if (document.body.classList.contains("off-canvas")) {
                     document.body.classList.remove("off-canvas");
@@ -424,7 +435,7 @@ const modulesModule = {
                     activeModule.id = `${activeModule.moduleId}_${newModuleIndex}`;
                     activeModule.index = newModuleIndex;
                 }
-                
+
                 // Add module name to query string.
                 if (!activeModule.queryString) {
                     activeModule.queryString = `?moduleName=${encodeURIComponent(module.name)}`;
@@ -504,7 +515,7 @@ const modulesModule = {
                 };
                 state.moduleGroups.push(addToGroup);
             }
-            
+
             removeFromGroup.modules.splice(removeFromGroup.modules.indexOf(module), 1);
             addToGroup.modules.push(module);
 
@@ -532,10 +543,10 @@ const modulesModule = {
                 if (groupA.name > groupB.name) {
                     return 1;
                 }
-                
+
                 return 0;
             });
-            
+
             // Order the modules in each group.
             for (let group of state.moduleGroups) {
                 group.modules = group.modules.sort((moduleA, moduleB) => {
@@ -546,7 +557,7 @@ const modulesModule = {
                     if (moduleA.name > moduleB.name) {
                         return 1;
                     }
-                
+
                     return 0;
                 });
             }
@@ -564,7 +575,7 @@ const modulesModule = {
                 if (!moduleGroups.hasOwnProperty(group)) {
                     continue;
                 }
-                
+
                 for (let module of moduleGroups[group]) {
                     if (!module.autoLoad) {
                         continue;
@@ -609,7 +620,7 @@ const usersModule = {
     state: () => ({
         changePasswordError: null,
         updateTimeActiveTimer: null,
-        updateTimeActiveTimerStopped: true,
+        updateTimeActiveTimerWorking: false,
         totpBackupCodes: [],
         generateTotpBackupCodesError: null
     }),
@@ -622,10 +633,10 @@ const usersModule = {
             state.changePasswordError = message;
         },
         [START_UPDATE_TIME_ACTIVE_TIMER]: (state) => {
-            state.updateTimeActiveTimerStopped = false;
+            state.updateTimeActiveTimerWorking = true;
         },
         [STOP_UPDATE_TIME_ACTIVE_TIMER]: (state) => {
-            state.updateTimeActiveTimerStopped = true;
+            state.updateTimeActiveTimerWorking = false;
         },
         [SET_ACTIVE_TIMER_INTERVAL]: (state, interval) => {
             state.updateTimeActiveTimer = interval;
@@ -662,30 +673,31 @@ const usersModule = {
                 commit(CHANGE_PASSWORD_ERROR, result.error);
             }
         },
-        
+
         async [START_UPDATE_TIME_ACTIVE_TIMER]({ commit }) {
             commit(START_REQUEST);
-            
+
             // Clear old interval first.
             commit(CLEAR_ACTIVE_TIMER_INTERVAL);
 
             commit(START_UPDATE_TIME_ACTIVE_TIMER);
             const interval = await main.usersService.startUpdateTimeActiveTimer();
             commit(SET_ACTIVE_TIMER_INTERVAL, interval);
-            
+
             commit(END_REQUEST);
         },
 
         [STOP_UPDATE_TIME_ACTIVE_TIMER]({ commit }) {
             commit(STOP_UPDATE_TIME_ACTIVE_TIMER);
+            commit(CLEAR_ACTIVE_TIMER_INTERVAL);
         },
-        
+
         async [UPDATE_ACTIVE_TIME]({ commit }) {
             commit(START_REQUEST);
             const result = await main.usersService.updateActiveTime();
             commit(END_REQUEST);
         },
-        
+
         async [GENERATE_TOTP_BACKUP_CODES]({ commit }) {
             commit(START_REQUEST);
             const result = await main.usersService.generateTotpBackupCodes();
@@ -773,7 +785,11 @@ const branchesModule = {
         branches: [],
         entities: [],
         isMainBranch: false,
-        branchChanges: {}
+        branchChanges: {},
+        mergeBranchError: null,
+        mergeBranchResult: null,
+        deleteBranchResult: null,
+        deleteBranchError: null
     }),
 
     mutations: {
@@ -812,13 +828,13 @@ const branchesModule = {
         [GET_BRANCH_CHANGES](state, branchChanges) {
             state.branchChanges = branchChanges;
         },
-        
+
         [HANDLE_CONFLICT](state, { acceptChange, id }) {
             if (!state.mergeBranchResult || !state.mergeBranchResult.conflicts || !state.mergeBranchResult.conflicts.length) {
                 console.warn("Tried to handle conflict, but there are no conflicts.");
                 return;
             }
-            
+
             const conflict = state.mergeBranchResult.conflicts.find(c => c.id === id);
             if (!conflict) {
                 console.warn("Tried to handle a conflict that doesn't exist.");
@@ -832,7 +848,7 @@ const branchesModule = {
             if (!settings || !settings.property || !settings.operator || !settings.start) {
                 return;
             }
-            
+
             if (!state.mergeBranchResult || !state.mergeBranchResult.conflicts || !state.mergeBranchResult.conflicts.length) {
                 console.warn("Tried to handle conflicts, but there are no conflicts.");
                 return;
@@ -843,11 +859,11 @@ const branchesModule = {
                 let valueToCheck;
                 let startValue = settings.start;
                 let endValue = settings.end;
-                
+
                 // Get the value of the property we want to check for the conflict to accept or deny.
                 switch (settings.property) {
                     case "type":
-                        valueToCheck = conflict.typeDisplayName; 
+                        valueToCheck = conflict.typeDisplayName;
                         break;
                     case "field":
                         valueToCheck = conflict.fieldDisplayName;
@@ -870,16 +886,16 @@ const branchesModule = {
                         console.warn(`${HANDLE_MULTIPLE_CONFLICTS} - Unsupported property '${settings.property}'`)
                         continue;
                 }
-                
+
                 if (!valueToCheck) {
                     continue;
                 }
-                
+
                 // Format dates so that they're all the same format.
                 if (isDate) {
                     valueToCheck = new Date(valueToCheck);
                     valueToCheck = new Date(valueToCheck.getFullYear(), valueToCheck.getMonth(), valueToCheck.getDate());
-                    
+
                     startValue = new Date(startValue);
                     startValue = new Date(startValue.getFullYear(), startValue.getMonth(), startValue.getDate());
                     if (endValue) {
@@ -887,13 +903,13 @@ const branchesModule = {
                         endValue = new Date(endValue.getFullYear(), endValue.getMonth(), endValue.getDate());
                     }
                 }
-                
+
                 // Make sure string checks are case insensitive.
                 if (!isDate) {
                     valueToCheck = valueToCheck.toLowerCase();
                     startValue = startValue.toLowerCase();
                 }
-                
+
                 let found = false;
                 switch (settings.operator) {
                     case "contains":
@@ -916,13 +932,27 @@ const branchesModule = {
                         found = valueToCheck >= startValue && valueToCheck <= endValue;
                         break;
                 }
-                
+
                 if (!found) {
                     continue;
                 }
-                
+
                 conflict.acceptChange = acceptChange;
             }
+        },
+
+        [GET_DATA_SELECTORS_FOR_BRANCHES](state, dataSelectors) {
+            state.dataSelectors = dataSelectors;
+        },
+
+        [DELETE_BRANCH_SUCCESS](state, result) {
+            state.deleteBranchResult = result;
+            state.deleteBranchError = null;
+        },
+
+        [DELETE_BRANCH_ERROR](state, error) {
+            state.deleteBranchResult = null;
+            state.deleteBranchError = error;
         }
     },
 
@@ -942,7 +972,7 @@ const branchesModule = {
             }
             commit(END_REQUEST);
         },
-        
+
         [CREATE_BRANCH_ERROR]({ commit }, error) {
             commit(CREATE_BRANCH_ERROR, error);
         },
@@ -1012,6 +1042,29 @@ const branchesModule = {
 
         [HANDLE_MULTIPLE_CONFLICTS]({ commit }, payload) {
             commit(HANDLE_MULTIPLE_CONFLICTS, payload);
+        },
+
+        async [GET_DATA_SELECTORS_FOR_BRANCHES]({commit }) {
+            commit(START_REQUEST);
+            const dataSelectorsResponse = await main.branchesService.getDataSelectors();
+            commit(GET_DATA_SELECTORS_FOR_BRANCHES, dataSelectorsResponse.data);
+            commit(END_REQUEST);
+        },
+
+        async [DELETE_BRANCH]({ commit }, data) {
+            commit(START_REQUEST);
+            const result = await main.branchesService.delete(data);
+
+            if (result.success) {
+                if (result.data) {
+                    commit(DELETE_BRANCH_SUCCESS, result.data);
+                } else {
+                    commit(DELETE_BRANCH_ERROR, result.message);
+                }
+            } else {
+                commit(DELETE_BRANCH_ERROR, result.message);
+            }
+            commit(END_REQUEST);
         }
     },
 
@@ -1054,8 +1107,8 @@ const cacheModule = {
 };
 
 export default createStore({
-    // Do not enable strict mode when deploying for production! 
-    // Strict mode runs a synchronous deep watcher on the state tree for detecting inappropriate mutations, and it can be quite expensive when you make large amount of mutations to the state. 
+    // Do not enable strict mode when deploying for production!
+    // Strict mode runs a synchronous deep watcher on the state tree for detecting inappropriate mutations, and it can be quite expensive when you make large amount of mutations to the state.
     // Make sure to turn it off in production to avoid the performance cost.
     strict: process.env.NODE_ENV === "development",
 

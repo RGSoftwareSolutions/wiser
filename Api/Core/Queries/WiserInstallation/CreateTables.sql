@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS `wiser_entity`  (
   `dedicated_table_prefix` varchar(25) NOT NULL DEFAULT '',
   `delete_action` enum('archive','permanent','hide','disallow') CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'archive',
   `show_in_dashboard` tinyint(1) NOT NULL DEFAULT 0,
-  `store_type` enum('normal','document_store','hybrid') CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'normal',
+  `store_type` enum('table','document_store','hybrid') CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'normal',
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `name_module_id`(`name`, `module_id`) USING BTREE,
   INDEX `name`(`name`(100), `show_in_tree_view`) USING BTREE,
@@ -431,6 +431,21 @@ CREATE TABLE IF NOT EXISTS `wiser_query`  (
 ) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_general_ci ROW_FORMAT = Dynamic;
 
 -- ----------------------------
+-- Table structure for wiser_styled_output
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `wiser_styled_output`  (
+    `id` int NOT NULL,
+    `name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT NULL,
+    `format_begin` mediumtext CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL,
+    `format_item` mediumtext CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL,
+    `format_end` mediumtext CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL,
+    `format_empty` mediumtext CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL,
+    `query_id` int NULL DEFAULT NULL,
+    `return_type` varchar(10) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT NULL,
+    PRIMARY KEY (`id`) USING BTREE
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_general_ci ROW_FORMAT = Dynamic;
+
+-- ----------------------------
 -- Table structure for wiser_roles
 -- ----------------------------
 CREATE TABLE IF NOT EXISTS `wiser_roles`  (
@@ -562,6 +577,7 @@ CREATE TABLE IF NOT EXISTS `wiser_data_selector`  (
   `available_for_rendering` tinyint(1) NOT NULL DEFAULT 1,
   `default_template` bigint UNSIGNED NOT NULL DEFAULT 0,
   `show_in_dashboard` tinyint(1) NOT NULL DEFAULT 0,
+  `available_for_branches` tinyint(1) NOT NULL DEFAULT 0,
   PRIMARY KEY (`id`) USING BTREE,
   INDEX `idx_name`(`name`) USING BTREE
 ) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_general_ci ROW_FORMAT = Dynamic;
@@ -665,8 +681,11 @@ CREATE TABLE IF NOT EXISTS `wiser_template`  (
    `changed_on` datetime NULL DEFAULT NULL,
    `changed_by` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
    `published_environment` tinyint NOT NULL DEFAULT 0,
-   `use_cache` int NOT NULL DEFAULT 0,
-   `cache_minutes` int NOT NULL DEFAULT 0,
+   `cache_per_url` tinyint(1) NOT NULL DEFAULT 0,
+   `cache_per_querystring` tinyint(1) NOT NULL DEFAULT 0,
+   `cache_per_hostname` tinyint(1) NOT NULL DEFAULT 0,
+   `cache_using_regex` tinyint(1) NOT NULL DEFAULT 0,
+   `cache_minutes` int NOT NULL DEFAULT -1,
    `login_required` tinyint(1) NOT NULL DEFAULT 0,
    `login_role` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT NULL,
    `login_redirect_url` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT NULL,
@@ -846,8 +865,8 @@ CREATE TABLE IF NOT EXISTS `wiser_dashboard`  (
   `entities_data` mediumtext CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL,
   `user_login_count_top10` int NOT NULL DEFAULT 0,
   `user_login_count_other` int NOT NULL DEFAULT 0,
-  `user_login_time_top10` time NOT NULL DEFAULT '00:00:00',
-  `user_login_time_other` time NOT NULL DEFAULT '00:00:00',
+  `user_login_active_top10` bigint NOT NULL DEFAULT 0,
+  `user_login_active_other` bigint NOT NULL DEFAULT 0,
   PRIMARY KEY (`id`) USING BTREE
 ) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_general_ci ROW_FORMAT = Dynamic;
 

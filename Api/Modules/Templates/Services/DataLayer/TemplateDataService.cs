@@ -22,13 +22,15 @@ namespace Api.Modules.Templates.Services.DataLayer
     public class TemplateDataService : ITemplateDataService, IScopedService
     {
         private readonly IDatabaseConnection clientDatabaseConnection;
+        private readonly IDatabaseHelpersService databaseHelpersService;
 
         /// <summary>
         /// Creates a new instance of <see cref="TemplateDataService"/>.
         /// </summary>
-        public TemplateDataService(IDatabaseConnection clientDatabaseConnection)
+        public TemplateDataService(IDatabaseConnection clientDatabaseConnection, IDatabaseHelpersService databaseHelpersService)
         {
             this.clientDatabaseConnection = clientDatabaseConnection;
+            this.databaseHelpersService = databaseHelpersService;
         }
 
         /// <inheritdoc />
@@ -68,7 +70,7 @@ LIMIT 1");
         public async Task<TemplateSettingsModel> GetDataAsync(int templateId, Environments? environment = null, int? version = null)
         {
             clientDatabaseConnection.ClearParameters();
-            
+
             string publishedVersionWhere;
             if (version.HasValue)
             {
@@ -94,8 +96,11 @@ LIMIT 1");
     template.template_data, 
     template.version, 
     template.changed_on, 
-    template.changed_by, 
-    template.use_cache,   
+    template.changed_by,
+    template.cache_per_url,
+    template.cache_per_querystring,
+    template.cache_per_hostname,
+    template.cache_using_regex,
     template.cache_minutes, 
     template.cache_location, 
     template.cache_regex,
@@ -155,7 +160,10 @@ LIMIT 1");
                 Version = dataTable.Rows[0].Field<int>("version"),
                 ChangedOn = dataTable.Rows[0].Field<DateTime>("changed_on"),
                 ChangedBy = dataTable.Rows[0].Field<string>("changed_by"),
-                UseCache = (TemplateCachingModes)dataTable.Rows[0].Field<int>("use_cache"),
+                CachePerUrl =  Convert.ToBoolean(dataTable.Rows[0]["cache_per_url"]),
+                CachePerQueryString =  Convert.ToBoolean(dataTable.Rows[0]["cache_per_querystring"]),
+                CacheUsingRegex =  Convert.ToBoolean(dataTable.Rows[0]["cache_using_regex"]),
+                CachePerHostName =  Convert.ToBoolean(dataTable.Rows[0]["cache_per_hostname"]),
                 CacheMinutes = dataTable.Rows[0].Field<int>("cache_minutes"),
                 CacheLocation = (TemplateCachingLocations)dataTable.Rows[0].Field<int>("cache_location"),
                 CacheRegex = dataTable.Rows[0].Field<string>("cache_regex"),
@@ -222,6 +230,33 @@ LIMIT 1");
         }
 
         /// <inheritdoc />
+        public async Task<(int Id, int Version, Environments Environment)> GetLatestVersionAsync(int templateId, string branchDatabaseName = null)
+        {
+            var databaseNamePrefix = String.IsNullOrWhiteSpace(branchDatabaseName) ? "" : $"`{branchDatabaseName}`.";
+
+            // Get the ID and published environment of the latest version of the template.
+            var query = $@"SELECT 
+    template.id,
+    template.version,
+    template.published_environment
+FROM {databaseNamePrefix}{WiserTableNames.WiserTemplate} AS template
+LEFT JOIN {databaseNamePrefix}{WiserTableNames.WiserTemplate} AS otherVersion ON otherVersion.template_id = template.template_id AND otherVersion.version > template.version
+WHERE template.template_id = ?templateId
+AND otherVersion.id IS NULL";
+            clientDatabaseConnection.AddParameter("templateId", templateId);
+            var dataTable = await clientDatabaseConnection.GetAsync(query,  skipCache: true, useWritingConnectionIfAvailable: true);
+            if (dataTable.Rows.Count == 0)
+            {
+                throw new Exception($"Template with ID {templateId} not found.");
+            }
+
+            var id = Convert.ToInt32(dataTable.Rows[0]["id"]);
+            var version = Convert.ToInt32(dataTable.Rows[0]["version"]);
+            var publishedEnvironment = (Environments)Convert.ToInt32(dataTable.Rows[0]["published_environment"]);
+            return (id, version, publishedEnvironment);
+        }
+
+        /// <inheritdoc />
         public async Task<int> UpdatePublishedEnvironmentAsync(int templateId, int version, Environments environment, PublishLogModel publishLog, string username, string branchDatabaseName = null)
         {
             switch (environment)
@@ -242,7 +277,7 @@ LIMIT 1");
             clientDatabaseConnection.AddParameter("environment", (int)environment);
 
             var databaseNamePrefix = String.IsNullOrWhiteSpace(branchDatabaseName) ? "" : $"`{branchDatabaseName}`.";
-            
+
             // Add the bit of the selected environment to the selected version.
             var query = $@"UPDATE {databaseNamePrefix}{WiserTableNames.WiserTemplate}
 SET published_environment = published_environment | ?environment
@@ -250,7 +285,7 @@ WHERE template_id = ?templateId
 AND version = ?version
 AND (published_environment & ?environment) != ?environment";
             var affectedRows = await clientDatabaseConnection.ExecuteAsync(query);
-            
+
             // Query to remove the selected environment from all other versions, the ~ operator flips all the bits (1s become 0s and 0s become 1s).
             // This way we can safely turn off just the specific bits without having to check to see if the bit is set.
             query = $@"UPDATE {databaseNamePrefix}{WiserTableNames.WiserTemplate}
@@ -373,7 +408,7 @@ LEFT JOIN {WiserTableNames.WiserTemplate} AS parent2 ON parent2.template_id = pa
 LEFT JOIN {WiserTableNames.WiserTemplate} AS parent3 ON parent3.template_id = parent2.parent_id AND parent3.version = (SELECT MAX(version) FROM {WiserTableNames.WiserTemplate} WHERE template_id = parent2.parent_id)
 LEFT JOIN {WiserTableNames.WiserTemplate} AS parent4 ON parent4.template_id = parent3.parent_id AND parent4.version = (SELECT MAX(version) FROM {WiserTableNames.WiserTemplate} WHERE template_id = parent3.parent_id)
 LEFT JOIN {WiserTableNames.WiserTemplate} AS parent5 ON parent5.template_id = parent4.parent_id AND parent5.version = (SELECT MAX(version) FROM {WiserTableNames.WiserTemplate} WHERE template_id = parent4.parent_id)
-WHERE template.template_type IN (2, 3, 4)
+WHERE template.template_type IN ({(int)TemplateTypes.Css}, {(int)TemplateTypes.Scss}, {(int)TemplateTypes.Js})
 AND template.removed = 0
 AND otherVersion.id IS NULL
 ORDER BY template.template_type ASC, template.template_name ASC");
@@ -428,7 +463,7 @@ GROUP BY wdc.content_id");
                 resultDao.ChangedOn = row.Field<DateTime>("changed_on");
                 resultDao.ChangedBy = row.Field<string>("changed_by");
                 resultDao.Title = row.Field<string>("title");
-                
+
 
                 resultList.Add(resultDao);
             }
@@ -437,17 +472,28 @@ GROUP BY wdc.content_id");
         }
 
         /// <inheritdoc />
-        public async Task<int> SaveAsync(TemplateSettingsModel templateSettings, string templateLinks, string username)
+        public async Task SaveAsync(TemplateSettingsModel templateSettings, string templateLinks, string username)
         {
-            var ordering = await GetOrderingAsync(templateSettings.TemplateId);
             clientDatabaseConnection.ClearParameters();
             clientDatabaseConnection.AddParameter("templateId", templateSettings.TemplateId);
-            clientDatabaseConnection.AddParameter("parentId", templateSettings.ParentId);
+
+            // Get the ID and published environment of the latest version of the template.
+            var latestVersion = await GetLatestVersionAsync(templateSettings.TemplateId);
+
+            // If the latest version is published to live, create a new version, because we never want to edit the version that is published to live directly.
+            if ((latestVersion.Environment & Environments.Live) == Environments.Live)
+            {
+                latestVersion.Id = await CreateNewVersionAsync(templateSettings.TemplateId);
+            }
+
+            clientDatabaseConnection.AddParameter("id", latestVersion.Id);
             clientDatabaseConnection.AddParameter("name", templateSettings.Name);
             clientDatabaseConnection.AddParameter("editorValue", templateSettings.EditorValue);
             clientDatabaseConnection.AddParameter("minifiedValue", templateSettings.MinifiedValue);
-            clientDatabaseConnection.AddParameter("type", templateSettings.Type);
-            clientDatabaseConnection.AddParameter("useCache", (int)templateSettings.UseCache);
+            clientDatabaseConnection.AddParameter("cachePerUrl", templateSettings.CachePerUrl);
+            clientDatabaseConnection.AddParameter("cachePerQueryString", templateSettings.CachePerQueryString);
+            clientDatabaseConnection.AddParameter("cachePerHostName", templateSettings.CachePerHostName);
+            clientDatabaseConnection.AddParameter("cacheUsingRegex", templateSettings.CacheUsingRegex);
             clientDatabaseConnection.AddParameter("cacheMinutes", templateSettings.CacheMinutes);
             clientDatabaseConnection.AddParameter("cacheLocation", templateSettings.CacheLocation);
             clientDatabaseConnection.AddParameter("cacheRegex", templateSettings.CacheRegex);
@@ -456,7 +502,6 @@ GROUP BY wdc.content_id");
             clientDatabaseConnection.AddParameter("loginRedirectUrl", templateSettings.LoginRedirectUrl);
             clientDatabaseConnection.AddParameter("now", DateTime.Now);
             clientDatabaseConnection.AddParameter("username", username);
-            clientDatabaseConnection.AddParameter("ordering", ordering);
             clientDatabaseConnection.AddParameter("insertMode", (int)templateSettings.InsertMode);
             clientDatabaseConnection.AddParameter("loadAlways", templateSettings.LoadAlways);
             clientDatabaseConnection.AddParameter("disableMinifier", templateSettings.DisableMinifier);
@@ -485,21 +530,72 @@ GROUP BY wdc.content_id");
             clientDatabaseConnection.AddParameter("widgetContent", templateSettings.WidgetContent);
             clientDatabaseConnection.AddParameter("widgetLocation", (int)templateSettings.WidgetLocation);
 
-            var query = $@"SET @VersionNumber = (SELECT MAX(version)+1 FROM {WiserTableNames.WiserTemplate} WHERE template_id = ?templateId GROUP BY template_id);
-INSERT INTO {WiserTableNames.WiserTemplate} (
-    template_name, 
-    template_data, 
-    template_data_minified,
-    template_type, 
-    `version`, 
-    template_id, 
+            var query = $@"UPDATE {WiserTableNames.WiserTemplate}
+SET template_name = ?name,
+    template_data = ?editorValue,
+    template_data_minified = ?minifiedValue,
+    changed_on = ?now,
+    changed_by = ?username,
+    cache_per_url = ?cachePerUrl,
+    cache_per_querystring = ?cachePerQueryString,
+    cache_per_hostname = ?cachePerHostName,
+    cache_using_regex = ?cacheUsingRegex,
+    cache_minutes = ?cacheMinutes,
+    cache_location = ?cacheLocation,
+    cache_regex = ?cacheRegex,
+    login_required = ?loginRequired,
+    login_role = ?loginRole,
+    login_redirect_url = ?loginRedirectUrl,
+    linked_templates = ?templateLinks,
+    insert_mode = ?insertMode,
+    load_always = ?loadAlways,
+    disable_minifier = ?disableMinifier,
+    url_regex = ?urlRegex,
+    external_files = ?externalFiles,
+    grouping_create_object_instead_of_array = ?groupingCreateObjectInsteadOfArray,
+    grouping_prefix = ?groupingPrefix,
+    grouping_key = ?groupingKey,
+    grouping_key_column_name = ?groupingKeyColumnName,
+    grouping_value_column_name = ?groupingValueColumnName,
+    is_scss_include_template = ?isScssIncludeTemplate,
+    use_in_wiser_html_editors = ?useInWiserHtmlEditors,
+    pre_load_query = ?preLoadQuery,
+    return_not_found_when_pre_load_query_has_no_data = ?returnNotFoundWhenPreLoadQueryHasNoData,
+    routine_type = ?routineType,
+    routine_parameters = ?routineParameters,
+    routine_return_type = ?routineReturnType,
+    trigger_timing = ?triggerTiming,
+    trigger_event = ?triggerEvent,
+    trigger_table_name = ?triggerTableName,
+    is_default_header = ?isDefaultHeader,
+    is_default_footer = ?isDefaultFooter,
+    is_partial = ?isPartial,
+    widget_content = ?widgetContent,
+    widget_location = ?widgetLocation,
+    is_dirty = TRUE
+WHERE id = ?id";
+            await clientDatabaseConnection.ExecuteAsync(query);
+        }
+
+        /// <inheritdoc />
+        public async Task<int> CreateNewVersionAsync(int templateId)
+        {
+            clientDatabaseConnection.ClearParameters();
+            clientDatabaseConnection.AddParameter("templateId", templateId);
+            clientDatabaseConnection.AddParameter("now", DateTime.Now);
+
+            var query = $@"INSERT INTO {WiserTableNames.WiserTemplate} (
     parent_id,
-    changed_on, 
-    changed_by, 
-    use_cache,
-    cache_minutes, 
-    cache_location,
-    cache_regex,
+    template_name,
+    template_data,
+    template_data_minified,
+    template_type,
+    version,
+    template_id,
+    changed_on,
+    changed_by,
+    published_environment,
+    cache_minutes,
     login_required,
     login_role,
     login_redirect_url,
@@ -515,68 +611,88 @@ INSERT INTO {WiserTableNames.WiserTemplate} (
     grouping_key,
     grouping_key_column_name,
     grouping_value_column_name,
+    removed,
     is_scss_include_template,
     use_in_wiser_html_editors,
     pre_load_query,
+    cache_location,
     return_not_found_when_pre_load_query_has_no_data,
+    cache_regex,
     routine_type,
     routine_parameters,
     routine_return_type,
+    is_default_header,
+    is_default_footer,
+    default_header_footer_regex,
     trigger_timing,
     trigger_event,
     trigger_table_name,
-    is_default_header,
-    is_default_footer,
     is_partial,
     widget_content,
-    widget_location
-) 
-VALUES (
-    ?name,
-    ?editorValue,
-    ?minifiedValue,
-    ?type,
-    @VersionNumber,
-    ?templateId,
-    ?parentId,
-    ?now,
-    ?username,
-    ?useCache,
-    ?cacheMinutes,
-    ?cacheLocation,
-    ?cacheRegex,
-    ?loginRequired,
-    ?loginRole,
-    ?loginRedirectUrl,
-    ?templateLinks,
-    ?ordering,
-    ?insertMode,
-    ?loadAlways,
-    ?disableMinifier,
-    ?urlRegex,
-    ?externalFiles,
-    ?groupingCreateObjectInsteadOfArray,
-    ?groupingPrefix,
-    ?groupingKey,
-    ?groupingKeyColumnName,
-    ?groupingValueColumnName,
-    ?isScssIncludeTemplate,
-    ?useInWiserHtmlEditors,
-    ?preLoadQuery,
-    ?returnNotFoundWhenPreLoadQueryHasNoData,
-    ?routineType,
-    ?routineParameters,
-    ?routineReturnType,
-    ?triggerTiming,
-    ?triggerEvent,
-    ?triggerTableName,
-    ?isDefaultHeader,
-    ?isDefaultFooter,
-    ?isPartial,
-    ?widgetContent,
-    ?widgetLocation
-)";
-            return await clientDatabaseConnection.ExecuteAsync(query);
+    widget_location,
+    cache_per_url,
+    cache_per_querystring,
+    cache_per_hostname,
+    cache_using_regex,
+    is_dirty
+)
+SELECT
+    template.parent_id,
+    template.template_name,
+    template.template_data,
+    template.template_data_minified,
+    template.template_type,
+    template.version + 1 AS version,
+    template.template_id,
+    ?now AS changed_on,
+    'Wiser' AS changed_by,
+    0 AS published_environment,
+    template.cache_minutes,
+    template.login_required,
+    template.login_role,
+    template.login_redirect_url,
+    template.linked_templates,
+    template.ordering,
+    template.insert_mode,
+    template.load_always,
+    template.disable_minifier,
+    template.url_regex,
+    template.external_files,
+    template.grouping_create_object_instead_of_array,
+    template.grouping_prefix,
+    template.grouping_key,
+    template.grouping_key_column_name,
+    template.grouping_value_column_name,
+    template.removed,
+    template.is_scss_include_template,
+    template.use_in_wiser_html_editors,
+    template.pre_load_query,
+    template.cache_location,
+    template.return_not_found_when_pre_load_query_has_no_data,
+    template.cache_regex,
+    template.routine_type,
+    template.routine_parameters,
+    template.routine_return_type,
+    template.is_default_header,
+    template.is_default_footer,
+    template.default_header_footer_regex,
+    template.trigger_timing,
+    template.trigger_event,
+    template.trigger_table_name,
+    template.is_partial,
+    template.widget_content,
+    template.widget_location,
+    template.cache_per_url,
+    template.cache_per_querystring,
+    template.cache_per_hostname,
+    template.cache_using_regex,
+    FALSE AS is_dirty
+FROM {WiserTableNames.WiserTemplate} AS template
+LEFT JOIN {WiserTableNames.WiserTemplate} AS otherVersion ON otherVersion.template_id = template.template_id AND otherVersion.version > template.version
+WHERE template.template_id = ?templateId
+AND otherVersion.id IS NULL;";
+            var newId = await clientDatabaseConnection.InsertRecordAsync(query);
+            return Convert.ToInt32(newId);
         }
 
         /// <inheritdoc />
@@ -592,7 +708,7 @@ LEFT JOIN {WiserTableNames.WiserTemplate} AS otherVersion ON otherVersion.templa
 WHERE
     template.template_id = ?parentId
     AND template.parent_id IS NULL
-    AND template.template_type = 7
+    AND template.template_type = {(int)TemplateTypes.Directory}
     AND template.removed = 0
     AND otherVersion.id IS NULL
 GROUP BY template.template_id
@@ -615,7 +731,7 @@ ORDER BY template.ordering ASC";
 FROM {WiserTableNames.WiserTemplate} AS template
 LEFT JOIN {WiserTableNames.WiserTemplate} AS otherVersion ON otherVersion.template_id = template.template_id AND otherVersion.version > template.version
 LEFT JOIN {WiserTableNames.WiserTemplate} AS child ON child.parent_id = template.template_id
-WHERE template.parent_id {(parentId == 0 ? "IS NULL AND template.template_type = 7" : "= ?parentId")}
+WHERE template.parent_id {(parentId == 0 ? $"IS NULL AND template.template_type = {(int)TemplateTypes.Directory}" : "= ?parentId")}
 AND template.removed = 0
 AND otherVersion.id IS NULL
 GROUP BY template.template_id
@@ -737,7 +853,7 @@ LEFT JOIN {WiserTableNames.WiserTemplate} AS parent8 ON parent8.template_id = pa
             clientDatabaseConnection.ClearParameters();
             clientDatabaseConnection.AddParameter("searchValue", searchValue);
             var dataTable = await clientDatabaseConnection.GetAsync(query);
-            
+
             var allItems = new List<SearchResultModel>();
 
             foreach (DataRow dataRow in dataTable.Rows)
@@ -810,7 +926,7 @@ AND template.removed = 0
 AND otherVersion.id IS NULL";
 
             dataTable = await clientDatabaseConnection.GetAsync(query);
-            
+
             // Local function to add unique results to the all items collection.
             void AddEncryptedTemplates(List<SearchResultModel> currentLevel)
             {
@@ -820,7 +936,7 @@ AND otherVersion.id IS NULL";
                     {
                         allItems.Add(result);
                     }
-                    
+
                     AddEncryptedTemplates(result.ChildNodes.Cast<SearchResultModel>().ToList());
                 }
             }
@@ -831,7 +947,7 @@ AND otherVersion.id IS NULL";
             {
                 var templateId = dataRow.Field<int>("template_id");
                 var templateData = dataRow.Field<string>("template_data");
-                
+
                 // Non encrypted templates are already checked by thr query and can be skipped.
                 if (allItems.Any(i => i.TemplateId == templateId) || String.IsNullOrWhiteSpace(templateData) || templateData.StartsWith("<") || templateData.DecryptWithAes(encryptionKey, useSlowerButMoreSecureMethod: true).IndexOf(searchValue, StringComparison.OrdinalIgnoreCase) == -1)
                 {
@@ -842,13 +958,13 @@ AND otherVersion.id IS NULL";
                 AddEncryptedTemplates(searchResults);
                 encryptedTemplatesAdded = true;
             }
-            
-            
+
+
             if (!encryptedTemplatesAdded)
             {
                 return results;
             }
-            
+
             // Reset the result with the added values from the encrypted templates.
             results = allItems.Where(i => i.ParentId == 0).ToList();
             AddChildren(results);
@@ -870,8 +986,8 @@ AND otherVersion.id IS NULL";
             clientDatabaseConnection.AddParameter("editorval", editorValue);
 
             var dataTable = await clientDatabaseConnection.GetAsync(@$"SET @id = (SELECT MAX(template_id)+1 FROM {WiserTableNames.WiserTemplate});
-                                                            INSERT INTO {WiserTableNames.WiserTemplate} (parent_id, template_name, template_type, version, template_id, changed_on, changed_by, published_environment, ordering, template_data)
-                                                            VALUES (?parent, ?name, ?type, 1, @id, ?now, ?username, 1, ?ordering, ?editorval);
+                                                            INSERT INTO {WiserTableNames.WiserTemplate} (parent_id, template_name, template_type, version, template_id, changed_on, changed_by, published_environment, ordering, template_data, cache_minutes)
+                                                            VALUES (?parent, ?name, ?type, 1, @id, ?now, ?username, 1, ?ordering, ?editorval, -1);
                                                             SELECT @id;");
 
             return Convert.ToInt32(dataTable.Rows[0]["@id"]);
@@ -908,7 +1024,7 @@ SET template.ordering = ordering.newOrdering";
         {
             clientDatabaseConnection.ClearParameters();
             clientDatabaseConnection.AddParameter("id", templateId);
-            
+
             var query = $@"SELECT parent.template_id, parent.template_name
 FROM {WiserTableNames.WiserTemplate} AS template
 LEFT JOIN {WiserTableNames.WiserTemplate} AS otherVersion ON otherVersion.template_id = template.template_id AND otherVersion.version > template.version
@@ -1112,8 +1228,11 @@ ORDER BY parent8.ordering, parent7.ordering, parent6.ordering, parent5.ordering,
     template.template_data, 
     template.version, 
     template.changed_on, 
-    template.changed_by, 
-    template.use_cache,   
+    template.changed_by,   
+    template.cache_per_url,   
+    template.cache_per_querystring,   
+    template.cache_per_hostname,
+    template.cache_using_regex,  
     template.cache_minutes, 
     template.cache_location, 
     template.cache_regex,
@@ -1167,8 +1286,10 @@ ORDER BY parent8.ordering, parent7.ordering, parent6.ordering, parent5.ordering,
                     Version = dataRow.Field<int>("version"),
                     ChangedOn = dataRow.Field<DateTime>("changed_on"),
                     ChangedBy = dataRow.Field<string>("changed_by"),
-                    UseCache = (TemplateCachingModes) dataRow.Field<int>("use_cache"),
-                    CacheMinutes = dataRow.Field<int>("cache_minutes"),
+                    CachePerUrl = dataTable.Rows[0].Field<bool>("cache_per_url"),
+                    CachePerQueryString = dataTable.Rows[0].Field<bool>("cache_per_querystring"),
+                    CacheUsingRegex = dataTable.Rows[0].Field<bool>("cache_using_regex"),
+                    CachePerHostName = dataTable.Rows[0].Field<bool>("cache_per_hostname"), CacheMinutes = dataRow.Field<int>("cache_minutes"),
                     CacheLocation = (TemplateCachingLocations) dataRow.Field<int>("cache_location"),
                     CacheRegex = dataTable.Rows[0].Field<string>("cache_regex"),
                     LoginRequired = Convert.ToBoolean(dataRow["login_required"]),
@@ -1193,7 +1314,7 @@ ORDER BY parent8.ordering, parent7.ordering, parent6.ordering, parent5.ordering,
                     PreLoadQuery = dataRow.Field<string>("pre_load_query"),
                     ReturnNotFoundWhenPreLoadQueryHasNoData = Convert.ToBoolean(dataRow["return_not_found_when_pre_load_query_has_no_data"])
                 };
-                
+
                 var loginRolesString = dataRow.Field<string>("login_role");
                 if (!String.IsNullOrWhiteSpace(loginRolesString))
                 {
@@ -1284,11 +1405,11 @@ AND otherVersion.id IS NULL";
 
             return true;
         }
-        
+
         /// <inheritdoc />
         public void DecryptEditorValueIfEncrypted(string encryptionKey, TemplateSettingsModel rawTemplateModel)
         {
-            if (rawTemplateModel.Type == TemplateTypes.Xml && !String.IsNullOrWhiteSpace(rawTemplateModel.EditorValue) && !rawTemplateModel.EditorValue.StartsWith("<"))
+            if (rawTemplateModel.Type == TemplateTypes.Xml && !String.IsNullOrWhiteSpace(rawTemplateModel.EditorValue) && !rawTemplateModel.EditorValue.Trim().StartsWith("<"))
             {
                 rawTemplateModel.EditorValue = rawTemplateModel.EditorValue.DecryptWithAes(encryptionKey, useSlowerButMoreSecureMethod: true);
             }
@@ -1305,6 +1426,42 @@ LEFT JOIN {WiserTableNames.WiserTemplate} AS otherVersion ON otherVersion.templa
 WHERE template.template_id IN ({String.Join(", ", templateIds)})
 AND otherVersion.id IS NULL";
             await clientDatabaseConnection.ExecuteAsync(query);
+        }
+
+        /// <inheritdoc />
+        public async Task KeepTablesUpToDateAsync()
+        {
+            var lastTableUpdates = await databaseHelpersService.GetLastTableUpdatesAsync(clientDatabaseConnection.ConnectedDatabase);
+
+            // Check if the templates table needs to be updated.
+            if ((lastTableUpdates.TryGetValue(Constants.SetIsDirtyToTemplates, out var value) && value >= new DateTime(2023, 7, 4)))
+            {
+                return;
+            }
+
+            var query = $@"UPDATE {WiserTableNames.WiserTemplate} AS template
+LEFT JOIN {WiserTableNames.WiserTemplate} AS otherVersion ON otherVersion.template_id = template.template_id AND otherVersion.version > template.version
+LEFT JOIN {WiserTableNames.WiserCommitTemplate} AS templateCommit ON templateCommit.template_id = template.template_id AND templateCommit.version = template.version
+SET template.is_dirty = TRUE
+WHERE template.template_type != {(int)TemplateTypes.Directory} 
+AND template.removed = 0
+AND template.is_dirty = FALSE
+AND otherVersion.id IS NULL
+AND templateCommit.id IS NULL";
+            await clientDatabaseConnection.ExecuteAsync(query);
+
+            clientDatabaseConnection.ClearParameters();
+            clientDatabaseConnection.AddParameter("tableName", Constants.SetIsDirtyToTemplates);
+            clientDatabaseConnection.AddParameter("lastUpdate", DateTime.Now);
+            var lastUpdateData = await clientDatabaseConnection.GetAsync($"SELECT NULL FROM `{WiserTableNames.WiserTableChanges}` WHERE `name` = ?tableName");
+            if (lastUpdateData.Rows.Count == 0)
+            {
+                await clientDatabaseConnection.ExecuteAsync($"INSERT INTO `{WiserTableNames.WiserTableChanges}` (`name`, last_update) VALUES (?tableName, ?lastUpdate)");
+            }
+            else
+            {
+                await clientDatabaseConnection.ExecuteAsync($"UPDATE `{WiserTableNames.WiserTableChanges}` SET last_update = ?lastUpdate WHERE `name` = ?tableName LIMIT 1");
+            }
         }
 
         /// <summary>

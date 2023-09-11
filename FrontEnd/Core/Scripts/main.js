@@ -25,29 +25,30 @@ import {
     AUTH_LOGOUT,
     AUTH_REQUEST,
     CHANGE_PASSWORD,
+    CLEAR_CACHE,
+    CLEAR_CACHE_ERROR,
+    CLEAR_LOCAL_TOTP_BACKUP_CODES,
     CLOSE_ALL_MODULES,
     CLOSE_MODULE,
     CREATE_BRANCH,
     CREATE_BRANCH_ERROR,
+    DELETE_BRANCH,
+    GENERATE_TOTP_BACKUP_CODES,
     GET_BRANCH_CHANGES,
     GET_BRANCHES,
     GET_CUSTOMER_TITLE,
+    GET_DATA_SELECTORS_FOR_BRANCHES,
     GET_ENTITIES_FOR_BRANCHES,
     HANDLE_CONFLICT,
     HANDLE_MULTIPLE_CONFLICTS,
     IS_MAIN_BRANCH,
     LOAD_ENTITY_TYPES_OF_ITEM_ID,
     MERGE_BRANCH,
+    MODULES_REQUEST,
     OPEN_MODULE,
     TOGGLE_PIN_MODULE,
-    CLEAR_CACHE,
-    CLEAR_CACHE_ERROR,
-    STOP_UPDATE_TIME_ACTIVE_TIMER,
     UPDATE_ACTIVE_TIME,
-    GENERATE_TOTP_BACKUP_CODES,
-    CLEAR_LOCAL_TOTP_BACKUP_CODES,
-    USER_BACKUP_CODES_GENERATED,
-    MODULES_REQUEST
+    USER_BACKUP_CODES_GENERATED
 } from "./store/mutation-types";
 import CacheService from "./shared/cache.service";
 
@@ -88,25 +89,39 @@ class Main {
         }
 
         if (this.appSettings.loadPartnerStyle) {
-            import(`../css/partner/${this.appSettings.subDomain}.css`);
+            import(`../Css/partner/${this.appSettings.subDomain}.css`);
         }
 
         this.api = axios.create({
             baseURL: this.appSettings.apiBase
         });
 
+        let stopRetrying = false;
         this.api.interceptors.response.use(undefined, async (error) => {
-            // Automatically re-authenticate with refresh token if login token expired or logout if that doesn't work or it is otherwise invalid.
-            if (error.response.status === 401) {
-                // If we ever get an unauthorized, logout the user.
-                if (error.response.config.url === "/connect/token") {
-                    this.vueApp.$store.dispatch(AUTH_LOGOUT);
-                } else {
-                    await this.vueApp.$store.dispatch(AUTH_REQUEST, { gotUnauthorized: true });
-                }
-            }
+            return new Promise(async (resolve, reject) => {
+                // Automatically re-authenticate with refresh token if login token expired or logout if that doesn't work or it is otherwise invalid.
+                if (error.response.status === 401 && !stopRetrying) {
+                    // If we ever get an unauthorized, logout the user.
+                    if (error.response.config.url === "/connect/token") {
+                        this.vueApp.$store.dispatch(AUTH_LOGOUT);
+                    } else {
+                        // Re-authenticate with the refresh token.
+                        await this.vueApp.$store.dispatch(AUTH_REQUEST, {gotUnauthorized: true});
+                        error.config.headers.Authorization = `Bearer ${localStorage.getItem("accessToken")}`;
 
-            return Promise.reject(error);
+                        // Retry the original request.
+                        this.api.request(error.config).then(response => {
+                            stopRetrying = false;
+                            resolve(response);
+                        }).catch((newError) => {
+                            stopRetrying = true;
+                            reject(newError);
+                        })
+                    }
+                }
+
+                reject(error);
+            });
         });
 
         if (this.appSettings.markerIoToken) {
@@ -229,7 +244,8 @@ class Main {
                             all: {
                                 mode: 0
                             }
-                        }
+                        },
+                        dataSelectors: []
                     },
                     branchMergeSettings: {
                         selectedBranch: {
@@ -256,16 +272,17 @@ class Main {
                         },
                         conflicts: []
                     },
-                    openBranchTypes: [
-                        { id: "wiser", name:  "Wiser" },
-                        { id: "website", name: "Website" }
+                    branchActions: [
+                        { id: "wiser", name:  "Openen in Wiser" },
+                        { id: "website", name: "Openen op mijn website" },
+                        { id: "delete", name: "Verwijderen" }
                     ],
-                    openBranchSettings: {
+                    branchActionSettings: {
                         selectedBranch: {
                             id: 0
                         },
                         websiteUrl: "",
-                        selectedBranchType: {
+                        selectedAction: {
                             id: ""
                         }
                     },
@@ -353,8 +370,14 @@ class Main {
                 mergeBranchError() {
                     return this.$store.state.branches.mergeBranchError;
                 },
+                deleteBranchError() {
+                    return this.$store.state.branches.deleteBranchError;
+                },
                 entitiesForBranches() {
                     return this.$store.state.branches.entities;
+                },
+                dataSelectorsForBranches() {
+                    return this.$store.state.branches.dataSelectors;
                 },
                 totalAmountOfItemsForCreatingBranch() {
                     return this.$store.state.branches.entities.reduce((accumulator, entity) => {
@@ -401,7 +424,7 @@ class Main {
                     if (!this.$store.state.branches.mergeBranchResult || !this.$store.state.branches.mergeBranchResult.conflicts) {
                         return 0;
                     }
-                    
+
                     return this.$store.state.branches.mergeBranchResult.conflicts.length;
                 },
                 totalAmountOfApprovedMergeConflicts() {
@@ -422,22 +445,22 @@ class Main {
                     return this.$store.state.cache.clearCacheError;
                 },
                 openBranchUrl() {
-                    if (!this.openBranchSettings || !this.openBranchSettings.selectedBranchType || !this.openBranchSettings.selectedBranchType.id) {
+                    if (!this.branchActionSettings || !this.branchActionSettings.selectedAction || !this.branchActionSettings.selectedAction.id) {
                         return "";
                     }
 
-                    if (this.openBranchSettings.selectedBranchType.id === 'website' && !this.openBranchSettings.websiteUrl) {
+                    if (this.branchActionSettings.selectedAction.id === 'website' && !this.branchActionSettings.websiteUrl) {
                         return "";
                     }
 
-                    if (!this.openBranchSettings || !this.openBranchSettings.selectedBranch|| !this.openBranchSettings.selectedBranch.id) {
+                    if (!this.branchActionSettings || !this.branchActionSettings.selectedBranch|| !this.branchActionSettings.selectedBranch.id) {
                         return "";
                     }
 
                     let url;
-                    switch (this.openBranchSettings.selectedBranchType.id) {
+                    switch (this.branchActionSettings.selectedAction.id) {
                         case "website":
-                            url = this.openBranchSettings.websiteUrl;
+                            url = this.branchActionSettings.websiteUrl;
                             if (!url.startsWith("http")) {
                                 url = `https://${url}`
                             }
@@ -446,11 +469,11 @@ class Main {
                                 url += "/";
                             }
 
-                            url = `${url.substring(0, url.indexOf("/", 8))}/branches/${encodeURIComponent(this.openBranchSettings.selectedBranch.database.databaseName)}`;
+                            url = `${url.substring(0, url.indexOf("/", 8))}/branches/${encodeURIComponent(this.branchActionSettings.selectedBranch.database.databaseName)}`;
 
                             break;
                         case "wiser":
-                            url = `https://${this.openBranchSettings.selectedBranch.subDomain}.${this.appSettings.currentDomain}`;
+                            url = `https://${this.branchActionSettings.selectedBranch.subDomain}.${this.appSettings.currentDomain}`;
 
                             break;
                         default:
@@ -541,7 +564,7 @@ class Main {
                         document.body.classList.remove("menu-active");
                     }
                 },
-                
+
                 showGeneralMessagePrompt(text = "", title = "") {
                     this.generalMessagePromptText = text;
                     this.generalMessagePromptTitle = title;
@@ -552,8 +575,7 @@ class Main {
                     if (event) {
                         event.preventDefault();
                     }
-                    
-                    this.$store.dispatch(STOP_UPDATE_TIME_ACTIVE_TIMER);
+
                     // Update the user's active time one last time.
                     await this.$store.dispatch(UPDATE_ACTIVE_TIME);
                     this.$store.dispatch(CLOSE_ALL_MODULES);
@@ -572,29 +594,29 @@ class Main {
 
                 closeModule(module) {
                     let timeout = null;
-                    
+
                     const callback = () => {
                         if (timeout) {
                             clearTimeout(timeout);
                         }
-                        
+
                         this.$store.dispatch(CLOSE_MODULE, module);
                     };
-                    
+
                     // In case the module does not handle the moduleClosing event.
                     timeout = setTimeout(callback, 800);
-                    
+
                     if (!module || !module.id) {
                         callback();
                         return;
                     }
-                    
+
                     const moduleIframe = document.getElementById(module.id);
                     if (!moduleIframe || !moduleIframe.contentWindow || !moduleIframe.contentWindow.document) {
                         callback();
                         return;
                     }
-                    
+
                     moduleIframe.contentWindow.document.dispatchEvent(new CustomEvent("moduleClosing", { detail: callback }));
                 },
 
@@ -747,14 +769,14 @@ class Main {
                     }
 
                     await this.$store.dispatch(CREATE_BRANCH, this.createBranchSettings);
-                    
+
                     if (!this.createBranchError) {
                         this.$refs.wiserCreateBranchPrompt.close();
                         this.showGeneralMessagePrompt("De branch staat klaar om gemaakt te worden. U krijgt een bericht wanneer dit voltooid is.");
-                        
+
                         return true;
                     }
-                    
+
                     return false;
                 },
 
@@ -762,7 +784,7 @@ class Main {
                     if (this.isMainBranch && (!this.branchMergeSettings.selectedBranch || !this.branchMergeSettings.selectedBranch.id)) {
                         return false;
                     }
-                    
+
                     if (this.mergeBranchResult && this.mergeBranchResult.conflicts && this.mergeBranchResult.conflicts.length > 0 && !this.areAllConflictsHandled) {
                         return false;
                     }
@@ -777,7 +799,7 @@ class Main {
                     if (this.mergeBranchError) {
                         return false;
                     }
-                    
+
                     if (this.mergeBranchResult.conflicts && this.mergeBranchResult.conflicts.length > 0) {
                         this.openMergeConflictsPrompt();
                         return true;
@@ -796,31 +818,66 @@ class Main {
                 async openOrCopyBranch(event, copy = false) {
                     event.preventDefault();
 
-                    if (!this.openBranchSettings || !this.openBranchSettings.selectedBranchType || !this.openBranchSettings.selectedBranchType.id) {
+                    if (!this.branchActionSettings || !this.branchActionSettings.selectedAction || !this.branchActionSettings.selectedAction.id) {
                         this.showGeneralMessagePrompt("Kies a.u.b. of u de branch in Wiser wilt openen of op uw website.");
                         return false;
                     }
-                    
-                    if (this.openBranchSettings.selectedBranchType.id === 'website' && !this.openBranchSettings.websiteUrl) {
+
+                    if (this.branchActionSettings.selectedAction.id === 'website' && !this.branchActionSettings.websiteUrl) {
                         this.showGeneralMessagePrompt("Vul a.u.b. de URL van uw website in.");
                         return false;
                     }
-                    
-                    if (!this.openBranchSettings || !this.openBranchSettings.selectedBranch|| !this.openBranchSettings.selectedBranch.id) {
+
+                    if (!this.branchActionSettings || !this.branchActionSettings.selectedBranch|| !this.branchActionSettings.selectedBranch.id) {
                         this.showGeneralMessagePrompt("Kies a.u.b. welke branch u wilt openen.");
                         return false;
                     }
-                    
+
                     if (copy) {
                         await navigator.clipboard.writeText(this.openBranchUrl);
                         this.showGeneralMessagePrompt("De URL is gekopieerd naar uw klembord.");
                         return;
                     }
-                    
+
                     window.open(this.openBranchUrl, "_blank");
                     this.$refs.wiserBranchesPrompt.close();
                 },
-                
+
+                openDeleteBranchConfirmationPrompt(event) {
+                    if (event) {
+                        event.preventDefault();
+                    }
+
+                    if (!this.branchActionSettings || !this.branchActionSettings.selectedAction || !this.branchActionSettings.selectedAction.id || this.branchActionSettings.selectedAction.id !== "delete") {
+                        return false;
+                    }
+
+                    if (!this.branchActionSettings || !this.branchActionSettings.selectedBranch|| !this.branchActionSettings.selectedBranch.id) {
+                        this.showGeneralMessagePrompt("Kies a.u.b. welke branch u wilt verwijderen.");
+                        return false;
+                    }
+
+                    this.$refs.deleteBranchConfirmationPrompt.open();
+                },
+
+                async deleteBranch(event) {
+                    if (event) {
+                        event.preventDefault();
+                    }
+
+                    await this.$store.dispatch(DELETE_BRANCH, this.branchActionSettings.selectedBranch.id);
+
+                    if (!this.deleteBranchError) {
+                        this.$refs.deleteBranchConfirmationPrompt.close();
+                        this.$refs.wiserBranchesPrompt.close();
+                        this.showGeneralMessagePrompt("De branch staat klaar om verwijderd te worden. U krijgt een bericht wanneer dit voltooid is.");
+
+                        return true;
+                    }
+
+                    return false;
+                },
+
                 updateBranchChangeList(isChecked, setting, type, operation) {
                     if (type === "all") {
                         for (let entityOrSettingType of this.branchChanges[setting]) {
@@ -848,7 +905,7 @@ class Main {
                         this.branchMergeSettings[setting][type].create = isChecked;
                         this.branchMergeSettings[setting][type].update = isChecked;
                         this.branchMergeSettings[setting][type].delete = isChecked;
-                    }  
+                    }
                 },
 
                 async clearWebsiteCache() {
@@ -856,7 +913,7 @@ class Main {
                         await this.$store.dispatch(CLEAR_CACHE_ERROR, "Vul a.u.b. een geldige URL in.");
                         return false;
                     }
-                    
+
                     if (!this.clearCacheSettings.areas || this.clearCacheSettings.areas.length === 0) {
                         await this.$store.dispatch(CLEAR_CACHE_ERROR, "Kies a.u.b. minimaal 1 cache optie om te legen.");
                         return false;
@@ -883,22 +940,22 @@ class Main {
                     this.$store.dispatch(USER_BACKUP_CODES_GENERATED);
                     return false;
                 },
-                
+
                 async reloadModules() {
                     await this.$store.dispatch(MODULES_REQUEST);
                 },
-                
+
                 openConfigurationModule(event) {
                     if (event) {
                         event.preventDefault();
                     }
-                    
+
                     const module = this.modules.find(module => module.type === "Configuration");
                     if (!module) {
                         kendo.alert("Configuratiemodule niet gevonden. Ververs a.u.b. de pagina en probeer het opnieuw, of neem contact op met ons.");
                         return;
                     }
-                    
+
                     this.openModule(module.moduleId);
                 },
 
@@ -936,20 +993,20 @@ class Main {
                     event.preventDefault();
                     this.$store.dispatch(TOGGLE_PIN_MODULE, moduleId);
                 },
-                
+
                 async onWiserBranchesPromptOpen() {
                     await this.$store.dispatch(IS_MAIN_BRANCH);
                     await this.$store.dispatch(GET_BRANCHES);
                     if (!this.isMainBranch) {
-                        this.openBranchSettings.selectedBranchType = {
+                        this.branchActionSettings.selectedAction = {
                             id: "website",
                             name: "Website"
                         };
 
-                        this.openBranchSettings.selectedBranch = this.branches.find(branch => branch.id === this.user.currentBranchId);
+                        this.branchActionSettings.selectedBranch = this.branches.find(branch => branch.id === this.user.currentBranchId);
                     }
                 },
-                
+
                 async onWiserMergeBranchPromptOpen(sender) {
                     if (this.branches && this.branches.length > 0) {
                         this.branchMergeSettings.selectedBranch = this.branches[0];
@@ -960,23 +1017,27 @@ class Main {
                         this.onSelectedBranchChange();
                     }
                 },
-                
+
                 async onWiserCreateBranchPromptOpen() {
                     await this.$store.dispatch(GET_ENTITIES_FOR_BRANCHES);
+                    await this.$store.dispatch(GET_DATA_SELECTORS_FOR_BRANCHES);
+
                     this.createBranchSettings = {
                         name: null,
                         startMode: "direct",
                         startOn: null,
                         entities: {
                             all: {
-                                mode: 0
+                                mode: 0,
+                                dataSelector: 0
                             }
                         }
                     };
-                    
+
                     for (let entity of this.entitiesForBranches) {
                         this.createBranchSettings.entities[entity.id] = {
-                            mode: 0
+                            mode: 0,
+                            dataSelector: 0
                         };
                     }
                 },
@@ -985,13 +1046,13 @@ class Main {
                     let selectedBranchId = event;
                     if (!selectedBranchId) {
                         selectedBranchId = 0;
-                    } 
+                    }
                     else if (selectedBranchId.target) {
                         selectedBranchId = event.target.value.id;
                     }
-                    
+
                     await this.$store.dispatch(GET_BRANCH_CHANGES, selectedBranchId);
-                    
+
                     // Clear all checkboxes.
                     this.branchMergeSettings.entities.all.everything = false;
                     this.branchMergeSettings.settings.all.everything = false;
@@ -1029,7 +1090,7 @@ class Main {
                 onCacheTypeChecked(event, cacheType) {
                     const isChecked = event.currentTarget.checked;
                     const allTypes = [...document.querySelectorAll(".cache-type")].map(input => input.value);
-                    
+
                     if (cacheType === "all") {
                         if (!isChecked) {
                             this.clearCacheSettings.areas = [];

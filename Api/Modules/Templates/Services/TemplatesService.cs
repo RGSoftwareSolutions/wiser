@@ -56,6 +56,7 @@ using MySql.Data.MySqlClient;
 using Newtonsoft.Json.Linq;
 using NUglify;
 using NUglify.JavaScript;
+using Constants = GeeksCoreLibrary.Modules.Templates.Models.Constants;
 using ITemplatesService = Api.Modules.Templates.Interfaces.ITemplatesService;
 
 namespace Api.Modules.Templates.Services
@@ -87,6 +88,7 @@ namespace Api.Modules.Templates.Services
         private readonly IWebHostEnvironment webHostEnvironment;
         private readonly IBranchesService branchesService;
         private readonly IMeasurementsDataService measurementsDataService;
+        private readonly IDynamicContentDataService dynamicContentDataService;
 
         /// <summary>
         /// Creates a new instance of TemplatesService.
@@ -110,7 +112,8 @@ namespace Api.Modules.Templates.Services
             IOptions<ApiSettings> apiSettings,
             IWebHostEnvironment webHostEnvironment,
             IBranchesService branchesService,
-            IMeasurementsDataService measurementsDataService)
+            IMeasurementsDataService measurementsDataService,
+            IDynamicContentDataService dynamicContentDataService)
         {
             this.httpContextAccessor = httpContextAccessor;
             this.wiserCustomersService = wiserCustomersService;
@@ -132,6 +135,7 @@ namespace Api.Modules.Templates.Services
             this.webHostEnvironment = webHostEnvironment;
             this.branchesService = branchesService;
             this.measurementsDataService = measurementsDataService;
+            this.dynamicContentDataService = dynamicContentDataService;
 
             if (clientDatabaseConnection is ClientDatabaseConnection connection)
             {
@@ -239,7 +243,7 @@ namespace Api.Modules.Templates.Services
 FROM {WiserTableNames.WiserTemplate} AS template
 LEFT JOIN {WiserTableNames.WiserTemplate} AS otherVersion ON otherVersion.template_id = template.template_id AND otherVersion.version > template.version
 WHERE (template.use_in_wiser_html_editors = 1 OR template.load_always = 1)
-AND template.template_type IN (2, 3)
+AND template.template_type IN ({(int)TemplateTypes.Css}, {(int)TemplateTypes.Scss})
 AND otherVersion.id IS NULL
 ORDER BY template.ordering ASC");
 
@@ -295,7 +299,7 @@ ORDER BY template.ordering ASC");
         }
 
         /// <summary>
-        /// Return the query-string as it was formally stored in the database. These strings are now hardcoded. 
+        /// Return the query-string as it was formally stored in the database. These strings are now hardcoded.
         /// Settings are also hardcoded now.
         /// </summary>
         /// <param name="templateName"></param>
@@ -355,217 +359,7 @@ ORDER BY template.ordering ASC");
         {
             if (TemplateQueryStrings.Count == 0)
             {
-                //MYSQL-QUERY TO GENERATE THE CODE TO FILL THE DICTIONARY
-                //select CONCAT('TemplateQueryStrings.Add("', name, '", @"', REPLACE(template, '"', '""'), '");') from easy_templates where binary upper(name) = name and COALESCE(trim(name), "") != "" and deleted = 0
-                //and version = (select MAX(version) from easy_templates M where M.name = easy_templates.name and M.deleted = 0)    //M.itemid = easy_templates.itemid => is itemid important here?
-
                 //load all the template queries into the dictionary
-                TemplateQueryStrings.Add("GET_DATA_FOR_RADIO_BUTTONS", @"SET @_itemId = {itemId};
-SET @entityproperty_id = {propertyid};
-SET @querytext = (SELECT data_query FROM wiser_entityproperty WHERE id=@entityproperty_id);
-
-PREPARE stmt1 FROM @querytext;
-EXECUTE stmt1; #USING @itemid;");
-                TemplateQueryStrings.Add("GET_ITEM_HTML_FOR_NEW_ITEMS", @"/********* IMPORTANT NOTE: If you change something in this query, please also change it in the query 'GET_ITEM_HTML' *********/
-SET SESSION group_concat_max_len = 1000000;
-SET @_moduleId = {moduleId};
-SET @_entityType = '{entityType}';
-
-SELECT 
-	e.tab_name,
-    
-	GROUP_CONCAT(
-        REPLACE(
-            REPLACE(
-                REPLACE(
-                    REPLACE(
-                         REPLACE(
-                             REPLACE(
-                                 REPLACE(
-                                   REPLACE(
-                                     REPLACE(
-                                       REPLACE(
-                                         REPLACE(t.html_template, '{title}', IFNULL(e.display_name,e.property_name))
-                                       ,'{options}', IFNULL(e.options, ''))
-                                     ,'{hint}', IFNULL(e.explanation,''))
-                                   ,'{default_value}', IFNULL(e.default_value, ''))
-                                 ,'{propertyId}', CONCAT('NEW_', e.id))
-                             ,'{itemId}', 0)
-                         ,'{propertyName}', e.property_name)
-                    ,'{extraAttribute}', IF(IFNULL(e.default_value, 0) > 0, 'checked', ''))
-                ,'{dependsOnField}', IFNULL(e.depends_on_field, ''))
-            ,'{dependsOnOperator}', IFNULL(e.depends_on_operator, ''))
-        ,'{dependsOnValue}', IFNULL(e.depends_on_value, ''))
-       ORDER BY e.tab_name ASC, e.ordering ASC SEPARATOR '') AS html_template,
-            
-        GROUP_CONCAT(
-            REPLACE(
-                REPLACE(
-                    REPLACE(
-                           REPLACE(
-                               REPLACE(
-                                   REPLACE(
-                                       REPLACE(
-                                           REPLACE(
-                                              REPLACE(t.script_template, '{propertyId}', CONCAT('NEW_', e.id)), 
-                                                 '{default_value}', CONCAT(""'"", REPLACE(IFNULL(e.default_value, """"), "","", ""','""), ""'"")
-                                              ),
-                                       '{options}', IF(e.options IS NULL OR e.options = '', '{}', e.options)),
-                                   '{propertyName}', e.property_name),
-                               '{itemId}', 0),
-                           '{title}', IFNULL(e.display_name, e.property_name)),
-                        '{dependsOnField}', IFNULL(e.depends_on_field, '')),
-                    '{dependsOnOperator}', IFNULL(e.depends_on_operator, '')),
-                '{dependsOnValue}', IFNULL(e.depends_on_value, ''))
-           ORDER BY e.tab_name ASC, e.ordering ASC SEPARATOR '') AS script_template
-            
-FROM wiser_entityproperty e
-JOIN wiser_field_templates t ON t.field_type = e.inputtype
-WHERE e.module_id = @_moduleId
-AND e.entity_name = @_entityType
-GROUP BY e.tab_name
-ORDER BY e.tab_name ASC, e.ordering ASC");
-                TemplateQueryStrings.Add("GET_EMAIL_TEMPLATES", @"# Module ID 64 is MailTemplates
-# Using texttypes 60 (subject) and 61 (content)
-
-SELECT
-    i.id AS template_id,
-    i.`name` AS template_name,
-    s.content AS email_subject,
-    c.content AS email_content
-FROM easy_items i
-JOIN item_content s ON s.item_id = i.id AND s.texttype_id = 60
-JOIN item_content c ON c.item_id = i.id AND c.texttype_id = 61
-WHERE i.moduleid = 64
-GROUP BY i.id");
-                TemplateQueryStrings.Add("SCHEDULER_GET_TEACHERS", @"SELECT 
-	""Kevin Manders"" AS `text`,
-    1 AS `value`
-UNION
-	SELECT 
-	""Test Docent 2"" ,
-    2
-UNION
-	SELECT 
-	""Test Docent 3"" ,
-    3
-UNION
-	SELECT 
-	""Test Docent 4"" ,
-    4");
-                TemplateQueryStrings.Add("SCHEDULER_UPDATE_FAVORITE", @"# insert ignore to favourite
-
-SET @user_id = '{userId}'; # for now always 1
-SET @favorite_id = '{favoriteId}';
-SET @search_input = '{search}';
-SET @view_type = '{type}';
-SET @set_teacher = '{teacher}';
-SET @set_category = '{category}';
-SET @set_location = '{location}';
-
-INSERT INTO schedule_favorites (user_id, favorite_id, search, view_type, teacher, category, location)
-VALUES(
-    @user_id, 
-    @favorite_id, 
-    @search_input, 
-    @view_type, 
-    @set_teacher, 
-    @set_category, 
-    @set_location)
-ON DUPLICATE KEY UPDATE 
-	search = @search_input, 
-    view_type = @view_type, 
-    teacher = @set_teacher, 
-    category = @set_category, 
-    location = @set_location;
-SELECT 1;");
-
-                TemplateQueryStrings.Add("SET_COMMUNICATION_DATA_SELECTOR", @"SET @_communication_id = {itemId};
-SET @_dataselector_id = {dataSelectorId};
-
-UPDATE wiser_communication
-SET receiver_selectionid = @_dataselector_id
-WHERE id = @_communication_id;
-
-SELECT ROW_COUNT() > 0 AS updateSuccessful;");
-                TemplateQueryStrings.Add("GET_ENTITY_TYPES", @"SET @_module_list = IF('{modules}' LIKE '{%}', '', '{modules}');
-
-SELECT DISTINCT `name` AS entityType
-FROM wiser_entity
-WHERE
-    `name` <> ''
-    AND IF(@_module_list = '', 1 = 1, FIND_IN_SET(module_id, @_module_list)) > 0
-ORDER BY `name`");
-                TemplateQueryStrings.Add("CHECK_DATA_SELECTOR_NAME_EXISTS", @"SET @_name = '{name}';
-
-# Will automatically be NULL if it doesn't exist, which is good.
-SET @_item_id = (SELECT id FROM wiser_data_selector WHERE `name` = @_name LIMIT 1);
-
-SELECT @_item_id IS NOT NULL AS nameExists;");
-                TemplateQueryStrings.Add("GET_ENTITY_PROPERTIES_LINKED_TO", @"################################################
-#                                              #
-#   NOTE: THIS QUERY IS DEPRECATED!            #
-#   USE THE '_DOWN' OR '_UP' VERSION INSTEAD   #
-#                                              #
-################################################
-
-SET @_module_list = IF('{modules}' LIKE '{%}', '', '{modules}');
-SET @_entity_type_list = IF('{entity_types}' LIKE '{%}', '', '{entity_types}');
-
-SELECT
-    display_name AS `name`,
-    CAST(IF(
-        inputtype = 'item-linker',
-        JSON_OBJECT(
-            'inputType', inputtype,
-            'type', `options`->>'$.linkTypeName',
-            'entityTypes', (SELECT GROUP_CONCAT(DISTINCT entity_name) FROM wiser_itemlink WHERE type_name = `options`->>'$.linkTypeName'),
-            'moduleId', `options`->>'$.moduleId'
-        ),
-        JSON_OBJECT(
-            'inputType', inputtype,
-            'type', `options`->>'$.entityType',
-            'entityTypes', `options`->>'$.entityType'
-        )
-    ) AS CHAR) AS `options`
-FROM wiser_entityproperty
-WHERE
-    IF(@_module_list = '', 1 = 1, FIND_IN_SET(module_id, @_module_list))
-    AND FIND_IN_SET(entity_name, @_entity_type_list)
-    AND inputtype IN ('item-linker', 'sub-entities-grid')
-ORDER BY display_name");
-                TemplateQueryStrings.Add("GET_WISER_TEMPLATES", @"SELECT
-    i.id AS template_id,
-    i.title AS template_name,
-    '' AS email_subject,
-    IF(d.long_value IS NULL OR d.long_value = '', d.`value`, d.long_value) AS email_content
-FROM wiser_item i
-JOIN wiser_itemdetail d ON d.item_id = i.id AND d.`key` = 'html_template'
-WHERE i.entity_type = 'template'
-ORDER BY i.title");
-                TemplateQueryStrings.Add("GET_PROPERTY_VALUES", @"SELECT wid.`value` AS `text`, wid.`value`
-FROM wiser_item wi
-JOIN wiser_itemdetail wid ON wid.item_id = wi.id
-WHERE wi.entity_type = '{entityName}' AND wid.`key` = '{propertyName}' AND wid.`value` <> ''
-GROUP BY wid.`value`
-ORDER BY wid.`value`
-LIMIT 25");
-                TemplateQueryStrings.Add("SCHEDULER_FAVORITE_CLEAR", @"SET @user_id = {userId};
-SET @favorite_id = {favId};
-
-DELETE FROM schedule_favorites WHERE user_id= @user_id AND favorite_id=@favorite_id LIMIT 1");
-                TemplateQueryStrings.Add("SCHEDULER_LOAD_FAVORITES", @"SET @user_id = '{userId}';
-
-
-SELECT 
-	favorite_id AS favoriteId,
-    search,
-    view_type AS type,
-    teacher,
-    category,
-    location
-FROM schedule_favorites WHERE user_id=@user_id;
-");
                 TemplateQueryStrings.Add("IMPORTEXPORT_GET_ENTITY_NAMES", @"SELECT `name`, module_id AS moduleId
 FROM wiser_entity
 WHERE `name` <> ''
@@ -575,17 +369,6 @@ SET removed = 1
 WHERE id = {itemId};
 
 SELECT ROW_COUNT() > 0 AS updateSuccessful;");
-                TemplateQueryStrings.Add("SET_ORDERING_DISPLAY_NAME", @"SET @_entity_name = {selectedEntityName};
-SET @_tab_name = {selectedTabName};
-SET @_order = {id};
-SET @_display_name = {dislayName};
-
-SET @_tab_name= IF( @_tab_name= ""gegevens"", """", @_tab_name);
-
-UPDATE wiser_entityproperty
-SET ordering = @_order
-WHERE entity_name = @_entity_name AND tab_name = @_tab_name AND display_name = @_display_name
-LIMIT 1");
                 TemplateQueryStrings.Add("UPDATE_LINK", @"SET @_linkId = {linkId};
 SET @_destinationId = {destinationId};
 SET @newOrderNumber = IFNULL((SELECT MAX(ordering) + 1 FROM wiser_itemlink WHERE destination_item_id = @destinationId), 1);
@@ -602,10 +385,10 @@ WHERE il1.id = @_linkId;
 UPDATE wiser_itemlink
 SET destination_item_id = @destinationId, ordering = @newOrderNumber
 WHERE id = @_linkId;");
-                TemplateQueryStrings.Add("GET_OPTIONS_FOR_DEPENDENCY", @"SELECT DISTINCT entity_name AS entityName, IF(tab_name = """", ""Gegevens"", tab_name) as tabName, display_name AS displayName, property_name AS propertyName FROM wiser_entityproperty
-WHERE entity_name = '{entityName}'");
+                TemplateQueryStrings.Add("GET_OPTIONS_FOR_DEPENDENCY", @"SELECT DISTINCT entity_name AS entityName, IF(tab_name = """", ""Gegevens"", tab_name) as tabName, CONCAT(IF(tab_name = """", ""Gegevens"", tab_name), "" --> "", display_name) AS displayName, property_name AS propertyName FROM wiser_entityproperty
+WHERE entity_name = '{entityName}'
+ORDER BY displayName");
 
-                TemplateQueryStrings.Add("GET_ALL_INPUT_TYPES", @"SELECT DISTINCT inputtype FROM wiser_entityproperty ORDER BY inputtype");
                 TemplateQueryStrings.Add("DELETE_ENTITYPROPERTY", @"DELETE FROM wiser_entityproperty WHERE tab_name = '{tabName}' AND entity_name = '{entityName}' AND id = '{entityPropertyId}'");
                 TemplateQueryStrings.Add("GET_ENTITY_PROPERTIES_ADMIN", @"SELECT id, entity_name AS entityName, tab_name AS tabName, display_name AS displayName, ordering FROM wiser_entityproperty
 WHERE tab_name = IF('{tabName}' = 'Gegevens', '', '{tabName}') AND entity_name = '{entityName}'
@@ -628,31 +411,6 @@ WHERE
     AND language_code <> ''
 GROUP BY language_code
 ORDER BY language_code");
-                TemplateQueryStrings.Add("UPDATE_ORDERING_ENTITY_PROPERTY", @"SET @old_index = {oldIndex} + 1;
-SET @new_index = {newIndex};
-SET @id = {currentId}; 
-SET @entity_name = '{entityName}';
-
-# move property to given index
-UPDATE wiser_entityproperty SET ordering = @new_index WHERE id=@id;
-
-# set other items to given index
-UPDATE wiser_entityproperty 
-SET ordering = IF(@old_index > @new_index, ordering, ordering) 
-WHERE ordering > IF(@old_index > @new_index, @new_index, @old_index)
-AND ordering < IF(@old_index > @new_index, @old_index, @new_index)
-AND entity_name = @entity_name
-AND id <> @id;
-
-# update record where index equals the new index value
-UPDATE wiser_entityproperty
-	SET ordering = IF(@old_index > @new_index, ordering+1, ordering-1) 
-WHERE 
-	ordering = @new_index AND 
-	entity_name = @entity_name AND 
-	tab_name =  @tab_name AND
-	id <> @id;
-");
                 TemplateQueryStrings.Add("GET_ENTITY_PROPERTIES_TABNAMES", @"SELECT id, IF(tab_name = '', 'Gegevens', tab_name) AS tabName FROM wiser_entityproperty
 WHERE entity_name = '{entityName}'
 GROUP BY tab_name
@@ -662,10 +420,6 @@ WHERE role_name != ''
 ORDER BY role_name ASC;");
                 TemplateQueryStrings.Add("INSERT_ROLE", @"INSERT INTO `wiser_roles` (`role_name`) VALUES ('{displayName}');");
                 TemplateQueryStrings.Add("DELETE_ROLE", @"DELETE FROM `wiser_roles` WHERE id={roleId}");
-                TemplateQueryStrings.Add("GET_ITEMLINK_NAMES", @"SELECT DISTINCT type_name AS type_name_text, type_name AS type_name_value FROM `wiser_itemlink` WHERE type_name <> """" AND type_name IS NOT NULL");
-                TemplateQueryStrings.Add("DELETE_RIGHT_ASSIGNMENT", @"DELETE FROM `wiser_permission` 
-WHERE role_id = {role_id}
-	AND entity_property_id = {entity_id}");
                 TemplateQueryStrings.Add("UPDATE_ENTITY_PROPERTY_PERMISSIONS", @"INSERT INTO `wiser_permission` (
     role_id, 
     entity_name, 
@@ -682,138 +436,17 @@ WHERE role_id = {role_id}
 ON DUPLICATE KEY UPDATE permissions = {permissionCode}");
                 TemplateQueryStrings.Add("GET_GROUPNAME_FOR_SELECTION", @"SELECT DISTINCT group_name AS groupName FROM `wiser_entityproperty`
 WHERE entity_name = '{selectedEntityName}' AND tab_name = '{selectedTabName}';");
-
-                TemplateQueryStrings.Add("GET_UNDERLYING_ENTITY_TYPES", @"#SET @_entity_type_list = IF('{entityTypes}' LIKE '{%}', '', '{entityTypes}');
-SET @_entity_name = IF(
-    '{entityName}' NOT LIKE '{%}',
-    '{entityName}',
-    # Check for old query string name.
-    IF(
-        '{entityTypes}' NOT LIKE '{%}',
-        SUBSTRING_INDEX('{entityTypes}', ',', 1),
-        ''
-    )
-);
-
-SELECT inputType, `options`, '' AS acceptedChildTypes
-FROM wiser_entityproperty
-WHERE entity_name = @_entity_name AND inputtype IN ('item-linker', 'sub-entities-grid')
-
-UNION
-
-SELECT 'sub-entities-grid' AS inputType, '' AS `options`, accepted_childtypes AS acceptedChildTypes
-FROM wiser_entity
-WHERE name = @_entity_name AND accepted_childtypes <> ''");
-                TemplateQueryStrings.Add("GET_PARENT_ENTITY_TYPES", @"#SET @_entity_type_list = IF('{entity_types}' LIKE '{%}', '', '{entity_types}');
-SET @_entity_name = IF(
-    '{entity_name}' NOT LIKE '{%}',
-    '{entity_name}',
-    # Check for old query string name.
-    IF(
-        '{entity_types}' NOT LIKE '{%}',
-        SUBSTRING_INDEX('{entity_types}', ',', 1),
-        ''
-    )
-);
-
-SELECT entity_name AS `name`, 'sub-entities-grid' AS inputType, IFNULL(`options`, '') AS `options`
-FROM wiser_entityproperty
-#WHERE inputtype = 'sub-entities-grid' AND CheckValuesInString(@_entity_name, `options`, '""', '""') = 1
-WHERE inputtype = 'sub-entities-grid' AND `options` LIKE CONCAT('%""', @_entity_name, '""%')
-
-UNION
-
-SELECT `name`, 'sub-entities-grid' AS inputType, '' AS `options`
-FROM wiser_entity
-WHERE FIND_IN_SET(accepted_childtypes, @_entity_name) > 0");
-                TemplateQueryStrings.Add("INSERT_NEW_MODULE", @"INSERT INTO `wiser_module` (
-	`id`,
-    `custom_query`,
-    `count_query`
-) VALUES (
-    {moduleId},
-    '',
-    ''
-);");
-                TemplateQueryStrings.Add("CHECK_IF_MODULE_EXISTS", @"SELECT id FROM `wiser_module` WHERE id = {moduleId};");
-                TemplateQueryStrings.Add("GET_MODULE_FIELDS", @"SELECT 
-    IFNULL(JSON_EXTRACT(`options`, '$.gridViewSettings.columns'), '') AS `fields`
-FROM `wiser_module`
-WHERE id = {module_id}");
                 TemplateQueryStrings.Add("UPDATE_API_AUTHENTICATION_DATA", @"UPDATE wiser_api_connection SET authentication_data = '{authenticationData}' WHERE id = {id:decrypt(true)};");
                 TemplateQueryStrings.Add("DELETE_MODULE", @"DELETE FROM `wiser_module` WHERE id = {module_id};");
-                TemplateQueryStrings.Add("SAVE_MODULE_SETTINGS", @"SET @moduleType := '{module_type}';
-SET @moduleOptions := '{options}';
-
-UPDATE `wiser_module` SET 
-	custom_query = '{custom_query}',
-    count_query = '{count_query}',
-    options = NULLIF(@moduleOptions, '')
-WHERE id = {module_id};");
                 TemplateQueryStrings.Add("INSERT_ENTITYPROPERTY", @"SET @newOrderNr = IFNULL((SELECT MAX(ordering)+1 FROM wiser_entityproperty WHERE entity_name='{entityName}' AND tab_name = '{tabName}'),1);
 
 INSERT INTO wiser_entityproperty(entity_name, tab_name, display_name, property_name, ordering)
 VALUES('{entityName}', '{tabName}', '{displayName}', '{propertyName}', @newOrderNr);
 #spaties vervangen door underscore");
-                TemplateQueryStrings.Add("SEARCH_ITEMS_OLD", @"SET @mid = {moduleid};
-SET @parent = '{id:decrypt(true)}';
-SET @_entityType = IF('{entityType}' LIKE '{%}', '', '{entityType}');
-SET @_searchValue = '{search}';
-SET @_searchInTitle = IF('{searchInTitle}' LIKE '{%}' OR '{searchInTitle}' = '1', TRUE, FALSE);
-SET @_searchFields = IF('{searchFields}' LIKE '{%}', '', '{searchFields}');
-SET @_searchEverywhere = IF('{searchEverywhere}' LIKE '{%}', FALSE, {searchEverywhere});
-
-SELECT 
-	i.id,
-	i.id AS encryptedId_encrypt_withdate,
-	i.title AS name,
-	IF(ilc.id IS NULL, 0, 1) AS haschilds,
-	we.icon AS spriteCssClass,
-	ilp.destination_item_id AS destination_item_id_withdate,
-    CASE i.published_environment
-    	WHEN 0 THEN 'onzichtbaar'
-        WHEN 1 THEN 'dev'
-        WHEN 2 THEN 'test'
-        WHEN 3 THEN 'acceptatie'
-        WHEN 4 THEN 'live'
-    END AS published_environment,
-    i.entity_type,
-    CreateJsonSafeProperty(id.`key`) AS property_name,
-    id.`value` AS property_value,
-    ilp.type_name AS link_type
-FROM wiser_item i
-LEFT JOIN wiser_itemlink ilp ON ilp.destination_item_id = @parent AND ilp.item_id = i.id
-LEFT JOIN wiser_entityproperty p ON p.entity_name = i.entity_type
-LEFT JOIN wiser_itemdetail id ON id.item_id = i.id AND ((p.property_name IS NOT NULL AND p.property_name <> '' AND id.`key` = p.property_name) OR ((p.property_name IS NULL OR p.property_name = '') AND id.`key` = p.display_name))
-LEFT JOIN wiser_itemlink ilc ON ilc.destination_item_id = i.id
-LEFT JOIN wiser_entity we ON we.name = i.entity_type
-WHERE i.removed = 0
-AND i.entity_type = @_entityType
-AND (@_searchEverywhere = TRUE OR ilp.id IS NOT NULL)
-AND (
-    (NOT @_searchInTitle AND @_searchFields = '')
-    OR (@_searchInTitle AND i.title LIKE CONCAT('%', @_searchValue, '%'))
-    OR (@_searchFields <> '' AND FIND_IN_SET(id.key, @_searchFields) AND id.value LIKE CONCAT('%', @_searchValue, '%'))
-)
-
-GROUP BY i.id, id.id
-ORDER BY ilp.ordering, i.title
-#LIMIT {skip}, {take}");
-                TemplateQueryStrings.Add("PUBLISH_LIVE", @"UPDATE wiser_item SET published_environment=4 WHERE id={itemid:decrypt(true)};");
-                TemplateQueryStrings.Add("PUBLISH_ITEM", @"UPDATE wiser_item SET published_environment=4 WHERE id={itemid:decrypt(true)};");
-                TemplateQueryStrings.Add("HIDE_ITEM", @"UPDATE wiser_item SET published_environment=0 WHERE id={itemid:decrypt(true)};");
                 TemplateQueryStrings.Add("RENAME_ITEM", @"SET @item_id={itemid:decrypt(true)};
 SET @newname='{name}';
 
 UPDATE wiser_item SET title=@newname WHERE id=@item_id LIMIT 1;");
-                TemplateQueryStrings.Add("LOAD_USER_SETTING", @"SET @user_id = '{encryptedUserId:decrypt(true)}';
-SET @setting_name = '{settingName}';
-SET @entity_type = 'wiser_user_settings';
-
-SELECT CONCAT(`value`, long_value) AS `value`
-FROM wiser_itemdetail detail
-	JOIN wiser_item item ON item.id=detail.item_id AND item.unique_uuid = @user_id AND item.entity_type=@entity_type
-WHERE detail.`key` = @setting_name ");
                 TemplateQueryStrings.Add("GET_UNDERLYING_LINKED_TYPES", @"SET @_entity_name = IF(
     '{entityName}' NOT LIKE '{%}',
     '{entityName}',
@@ -844,31 +477,6 @@ SELECT destination_entity_type AS entityType, type AS linkTypeNumber, `name` AS 
 FROM wiser_link
 WHERE connected_entity_type = @_entity_name AND show_in_data_selector = 1
 ORDER BY entityType");
-                TemplateQueryStrings.Add("SAVE_USER_SETTING", @"SET @user_id = '{encryptedUserId:decrypt(true)}';
-SET @setting_name = '{settingName}';
-SET @setting_value = '{settingValue}';
-SET @entity_type = 'wiser_user_settings';
-SET @title = 'Wiser user settings';
-
-SET @itemId = (SELECT id FROM wiser_item item WHERE item.unique_uuid = @user_id AND item.entity_type=@entity_type AND @setting_name <> ''AND @user_id <> '' AND @user_id NOT LIKE '{%}');
-
-# make sure the wiser item exists
-INSERT IGNORE INTO wiser_item (id, unique_uuid, entity_type, title)
-	VALUES(@itemId, @user_id, @entity_type, @title);
-
-# now update the correct value
-INSERT INTO wiser_itemdetail (item_id, `key`, `value`, `long_value`)
-	SELECT 
-		item.id,
-		@setting_name,
-		IF(LENGTH(@setting_value > 1000), '', @setting_value),
-		IF(LENGTH(@setting_value >= 1000), @setting_value, null)
-	FROM wiser_item item WHERE item.unique_uuid = @user_id AND item.entity_type=@entity_type
-ON DUPLICATE KEY UPDATE 
-	`value` = IF(LENGTH(@setting_value > 1000), '', @setting_value), 
-	`long_value` = IF(LENGTH(@setting_value >= 1000), @setting_value, null);
-    
-SELECT @setting_value;");
                 TemplateQueryStrings.Add("GET_ITEM_VALUE", @"SELECT
 	id,
     `key`,
@@ -922,169 +530,9 @@ UNION SELECT 'Algemeen' AS tabName, 'Gewijzigd door' AS displayName, 'changed_by
 UNION SELECT 'Algemeen' AS tabName, 'Naam' AS displayName, 'title' AS propertyName
 
 ORDER BY tabName ASC, displayName ASC");
-                TemplateQueryStrings.Add("GET_ALL_MODULES_INFORMATION", @"SELECT 
-	id,
-	custom_query,
-	count_query,
-	`options`,
-	IF(`options` IS NULL, 0, 1) AS `isGridview`,    
-    IF(`options` IS NULL, 'treeview', 'gridview') AS `type`,
-# we check for type and isValidJson
-    IF(JSON_VALID(`options`) AND `options` IS NOT NULL AND `options` <> '', 1, 0) AS `isValidJson`,
-    #adding extra JSON_VALID to prevent errors in the query result.
-	IF(JSON_VALID(`options`),IFNULL(JSON_EXTRACT(`options`, '$.gridViewSettings.pageSize'), ''), '') AS `pageSize`,
-	IF(JSON_VALID(`options`),IF(JSON_EXTRACT(`options`, '$.gridViewSettings.toolbar.hideCreateButton') = true, 1, 0), 0) AS `hideCreationButton`,
-	IF(JSON_VALID(`options`),IF(JSON_EXTRACT(`options`, '$.gridViewSettings.hideCommandColumn') = true, 1, 0), 0) AS `hideCommandButton`
-FROM `wiser_module` 
-");
-
-                TemplateQueryStrings.Add("GET_AVAILABLE_ENTITY_TYPES", @"SELECT DISTINCT(e2.name)
-FROM wiser_entity e
-LEFT JOIN wiser_item i ON i.entity_type = e.name AND i.moduleid = e.module_id
-JOIN wiser_entity e2 ON e2.module_id = {moduleId} AND e2.name <> '' AND FIND_IN_SET(e2.name, e.accepted_childtypes)
-WHERE e.module_id = {moduleId}
-AND (({parentId:decrypt(true)} = 0 AND e.name = '') OR ({parentId:decrypt(true)} > 0 AND i.id = {parentId:decrypt(true)}))");
-
                 TemplateQueryStrings.Add("IMPORTEXPORT_GET_LINK_TYPES", @"SELECT type AS id, `name`
 FROM wiser_link
 ORDER BY `name`");
-                TemplateQueryStrings.Add("SAVE_ENTITY_VALUES", @"
-SET @_id = {id};
-SET @_name = '{name}';
-SET @_module_id = {moduleId};
-SET @_accepted_childtypes = '{acceptedChildtypes}';
-SET @_icon = '{icon}';
-SET @_icon_add = '{iconAdd}';
-SET @_icon_expanded = '{iconExpanded}';
-SET @_show_in_tree_view = '{showInTreeView}';
-SET @_query_after_insert = '{queryAfterInsert}';
-SET @_query_after_update = '{queryAfterUpdate}';
-SET @_query_before_update = '{queryBeforeUpdate}';
-SET @_query_before_delete = '{queryBeforeDelete}';
-SET @_color = '{color}';
-SET @_show_in_search = '{showInSearch}';
-SET @_show_overview_tab = '{showOverviewTab}';
-SET @_save_title_as_seo = '{saveTitleAsSeo}';
-#SET @_api_after_insert = {apiAfterInsert};
-#SET @_api_after_update = {apiAfterUpdate};
-#SET @_api_before_update = {apiBeforeUpdate};
-#SET @_api_before_delete = {apiBeforeDelete};
-SET @_show_title_field = '{showTitleField}';
-SET @_friendly_name = IF('{friendlyName}' = '' OR '{friendlyName}' LIKE '{%}', NULL, '{friendlyName}');
-SET @_save_history = '{saveHistory}';
-SET @_default_ordering = '{defaultOrdering}';
-SET @_dedicated_table_prefix = '{dedicatedTablePrefix}';
-
-SET @_show_in_tree_view = IF(@_show_in_tree_view = TRUE OR @_show_in_tree_view = 'true', 1, 0);
-SET @_show_in_search = IF(@_show_in_search = TRUE OR @_show_in_search = 'true', 1, 0);
-SET @_show_overview_tab = IF(@_show_overview_tab = TRUE OR @_show_overview_tab = 'true', 1, 0);
-SET @_save_title_as_seo = IF(@_save_title_as_seo = TRUE OR @_save_title_as_seo = 'true', 1, 0);
-SET @_show_title_field = IF(@_show_title_field = TRUE OR @_show_title_field = 'true', 1, 0);
-SET @_save_history = IF(@_save_history = TRUE OR @_save_history = 'true', 1, 0);
-
-SET @_name_changed = (SELECT `name` != @_name FROM wiser_entity WHERE id = @_id);
-SET @_name_old = (SELECT `name`  FROM wiser_entity WHERE id = @_id);
-
-UPDATE wiser_entity e
-LEFT JOIN wiser_entity accepted ON accepted.accepted_childtypes LIKE CONCAT('%',@_name_old,'%') AND @_name_changed
-LEFT JOIN wiser_entityproperty propertyOption ON REPLACE(`options` , ' ', '') LIKE CONCAT('%""entityType"":""',@_name_old,'""%') AND @_name_changed
-SET 
-     accepted.accepted_childtypes = REPLACE(accepted.accepted_childtypes, @_name_old, @_name),
-     propertyOption.`options` = REPLACE(propertyOption.`options`, @_name_old, @_name),
-	 e.module_id = @_module_id,
-	 e.name= @_name,
-	 e.accepted_childtypes = @_accepted_childtypes,
-	 e.icon = @_icon,
-	 e.icon_add = @_icon_add,
-	 e.icon_expanded = @_icon_expanded,
-	 e.show_in_tree_view = @_show_in_tree_view,
-	 e.query_after_insert = @_query_after_insert,
-	 e.query_after_update = @_query_after_update,
-	 e.query_before_update = @_query_before_update,
-	 e.query_before_delete = @_query_before_delete,
-	 e.color = @_color,
-	 e.show_in_search = @_show_in_search,
-	 e.show_overview_tab = @_show_overview_tab,
-	 e.save_title_as_seo = @_save_title_as_seo,
-	 #e.api_after_insert = @_api_after_insert,
-	 #e.api_after_update = @_api_after_update,
-	 #e.api_before_update = @_api_before_update,
-	 #e.api_before_delete = @_api_before_delete,
-	 e.show_title_field = @_show_title_field,
-	 e.friendly_name = @_friendly_name,
-	 e.save_history = @_save_history,
-	 e.default_ordering = @_default_ordering,
-     e.dedicated_table_prefix = @_dedicated_table_prefix
-WHERE e.id = @_id;
-");
-                TemplateQueryStrings.Add("SAVE_INITIAL_VALUES", @"SET @_entity_name = '{entityName}';
-SET @_tab_name = '{tabName}';
-SET @_tab_name = IF( @_tab_name='gegevens', '', @_tab_name);
-SET @_display_name = '{displayName}';
-SET @_property_name = IF('{propertyName}' = '', @_display_name, '{propertyName}');
-SET @_overviewvisibility = '{visibleInOverview}';
-SET @_overviewvisibility = IF(@_overviewvisibility = TRUE OR @_overviewvisibility = 'true', 1, 0);
-SET @_overviewWidth = '{overviewWidth}';
-SET @_groupName = '{groupName}';
-SET @_input_type = '{inputtype}';
-SET @_explanation = '{explanation}';
-SET @_mandatory = '{mandatory}';
-SET @_mandatory = IF(@_mandatory = TRUE OR @_mandatory = 'true', 1, 0);
-SET @_readOnly = '{readonly}';
-SET @_readOnly = IF(@_readOnly = TRUE OR @_readOnly = 'true', 1, 0);
-SET @_seo = '{alsoSaveSeoValue}';
-SET @_seo = IF(@_seo = TRUE OR @_seo = 'true', 1, 0);
-SET @_width = '{width}';
-SET @_height = '{height}';
-SET @_langCode = '{languageCode}';
-SET @_dependsOnField = '{dependsOnField}';
-SET @_dependsOnOperator = IF('{dependsOnOperator}' = '', NULL, '{dependsOnOperator}');
-SET @_dependsOnValue = '{dependsOnValue}';
-SET @_css = '{css}';
-SET @_regexValidation = '{regexValidation}';
-SET @_defaultValue = '{defaultValue}';
-SET @_automation = '{automation}';
-SET @_customScript = '{customScript}';
-SET @_options = '{options}';
-SET @_data_query = '{dataQuery}';
-SET @_grid_delete_query = '{gridDeleteQuery}';
-SET @_grid_insert_query = '{gridInsertQuery}';
-SET @_grid_update_query = '{gridUpdateQuery}';
-
-SET @_id = {id};
-
-UPDATE wiser_entityproperty
-SET 
-inputtype = @_input_type,
-display_name = @_display_name,
-property_name = @_property_name,
-visible_in_overview= @_overviewvisibility,
-overview_width= @_overviewWidth,
-group_name= @_groupName,
-explanation= @_explanation,
-regex_validation= @_regexValidation,
-mandatory= @_mandatory,
-readonly= @_readOnly,
-default_value= @_defaultValue,
-automation= @_automation,
-css= @_css,
-width= @_width,
-height= @_height,
-depends_on_field= @_dependsOnField,
-depends_on_operator= @_dependsOnOperator,
-depends_on_value= @_dependsOnValue,
-language_code= @_langCode,
-custom_script= @_customScript,
-also_save_seo_value = @_seo,
-tab_name = @_tab_name,
-options = @_options,
-data_query = @_data_query,
-grid_delete_query = @_grid_delete_query, 
-grid_insert_query= @_grid_insert_query,
-grid_update_query = @_grid_update_query
-WHERE entity_name = @_entity_name AND id = @_id
-LIMIT 1; ");
-
                 TemplateQueryStrings.Add("MOVE_ITEM", @"#Item verplaatsen naar ander item
 SET @src_id = '{source:decrypt(true)}';
 SET @dest_id = '{destination:decrypt(true)}';
@@ -1308,15 +756,6 @@ UNION
 			OR 
 			(permission.permissions & 8) > 0
 		)");
-                TemplateQueryStrings.Add("GET_ITEMLINK_NUMBERS", @"SELECT 'Hoofdkoppeling' AS type_text, 1 AS type_value 
-UNION ALL
-SELECT 'Subkoppeling' AS type_text, 2 AS type_value 
-UNION ALL
-SELECT 'Automatisch gegeneerd' AS type_text, 3 AS type_value 
-UNION ALL
-SELECT 'Media' AS type_text, 4 AS type_value 
-UNION ALL
-SELECT DISTINCT type AS type_text, type AS type_value FROM `wiser_itemlink` WHERE type > 100");
                 TemplateQueryStrings.Add("GET_COLUMNS_FOR_LINK_TABLE", @"SET @destinationId = {id:decrypt(true)};
 SET @_linkTypeNumber = IF('{linkTypeNumber}' LIKE '{%}' OR '{linkTypeNumber}' = '', '2', '{linkTypeNumber}');
 
@@ -1330,169 +769,17 @@ JOIN wiser_itemlink il ON il.item_id = i.id AND il.destination_item_id = @destin
 WHERE p.visible_in_overview = 1
 GROUP BY IF(p.property_name IS NULL OR p.property_name = '', p.display_name, p.property_name)
 ORDER BY p.ordering;");
-                TemplateQueryStrings.Add("GET_ENTITY_PROPERTIES_BY_LINK", @"SET @_link_type = IF('{linktype}' LIKE '{%}', '', '{linktype}');
-SET @_entity_type = IF('{entitytype}' LIKE '{%}', '', '{entitytype}');
-
-SELECT
-    CONCAT_WS(' - ', wip.entity_name, NULLIF(wip.tab_name, ''), NULLIF(wip.group_name, ''), wip.display_name) AS `text`,
-    IF(property_name = '', CreateJsonSafeProperty(display_name), property_name) AS `value`
-FROM wiser_itemlink wil
-JOIN wiser_entityproperty wip ON wip.entity_name = wil.entity_name
-WHERE wil.type = @_link_type
-# Some entities should be ignored due to their input types.
-AND wip.inputtype NOT IN ('sub-entities-grid', 'item-linker', 'linked-item', 'auto-increment', 'file-upload', 'action-button')
-GROUP BY wip.id");
-                TemplateQueryStrings.Add("GET_ENTITY_PROPERTIES_LINKED_TO_UP", @"# Bovenliggende objecten.
-
-SET @_module_list = IF('{modules}' LIKE '{%}', '', '{modules}');
-SET @_entity_type_list = IF('{entity_types}' LIKE '{%}', '', '{entity_types}');
-
-SELECT *
-FROM (
-    SELECT
-        entity_name AS `name`,
-        inputtype AS inputType,
-        entity_name AS type,
-        IF(
-            inputtype = 'item-linker',
-            (SELECT GROUP_CONCAT(DISTINCT entity_name) FROM wiser_itemlink WHERE type = `options`->>'$.linkTypeNumber'),
-            entity_name
-        ) AS entityTypes,
-        IF(inputtype = 'item-linker', module_id, 0) AS moduleId
-    FROM wiser_entityproperty
-    WHERE
-        IF(@_module_list = '', 1 = 1, FIND_IN_SET(module_id, @_module_list) > 0)
-        AND inputtype IN ('item-linker', 'sub-entities-grid')
-        AND IF(
-            inputtype = 'item-linker',
-            JSON_UNQUOTE(JSON_EXTRACT(`options`, JSON_UNQUOTE(JSON_SEARCH(`options`, 'one', @_entity_type_list)))) IS NOT NULL,
-            FIND_IN_SET(`options`->>'$.entityType', @_entity_type_list) > 0
-        )
-
-    UNION
-
-    SELECT
-        wep.entity_name AS `name`,
-        wep.inputtype AS inputType,
-        wep.entity_name AS type,
-        IF(
-            wep.inputtype = 'item-linker',
-            (SELECT GROUP_CONCAT(DISTINCT entity_name) FROM wiser_itemlink WHERE type = wep.`options`->>'$.linkTypeNumber'),
-            entity_name
-        ) AS entityTypes,
-        IF(inputtype = 'item-linker', wep.module_id, 0) AS moduleId
-    FROM wiser_entity we
-	JOIN wiser_entityproperty wep ON wep.entity_name = we.`name` AND wep.inputtype IN ('item-linker', 'sub-entities-grid')
-    WHERE
-        IF(@_module_list = '', 1 = 1, FIND_IN_SET(we.module_id, @_module_list) > 0)
-        AND CompareLists(@_entity_type_list, we.accepted_childtypes)
-) t
-GROUP BY t.type
-ORDER BY t.type");
-                TemplateQueryStrings.Add("GET_ENTITY_PROPERTIES_LINKED_TO_DOWN", @"# Onderliggende objecten.
-
-SET @_module_list = IF('{modules}' LIKE '{%}', '', '{modules}');
-SET @_entity_type_list = IF('{entity_types}' LIKE '{%}', '', '{entity_types}');
-
-SELECT *
-FROM (
-    SELECT
-        #display_name AS `name`,
-        CAST(IF(inputtype = 'item-linker', `options`->>'$.linkTypeNumber', `options`->>'$.entityType') AS CHAR) AS `name`,
-        inputtype AS inputType,
-        CAST(IF(inputtype = 'item-linker', `options`->>'$.linkTypeNumber', `options`->>'$.entityType') AS CHAR) AS type,
-        IF(
-            inputtype = 'item-linker',
-            IF(
-                `options`->>'$.entityTypes' IS NULL,
-                `options`->>'$.linkTypeNumber',
-                REPLACE(REPLACE(REPLACE(REPLACE(`options`->> '$.entityTypes', '[', ''), ']', ''), '""', '' ), ', ', ',')
-            ),
-            `options`->>'$.entityType'
-        ) AS entityTypes,
-        IF(inputtype = 'item-linker', `options`->>'$.moduleId', 0) AS moduleId
-    FROM wiser_entityproperty
-    WHERE
-        IF(@_module_list = '', 1 = 1, FIND_IN_SET(module_id, @_module_list) > 0)
-        AND FIND_IN_SET(entity_name, @_entity_type_list) > 0
-        AND inputtype IN ('item-linker', 'sub-entities-grid')
-
-    UNION
-
-    SELECT
-        #wep.display_name AS `name`,
-        CAST(IF(wep.inputtype = 'item-linker', wep.`options`->>'$.linkTypeNumber', wep.`options`->>'$.entityType') AS CHAR) AS `name`,
-        wep.inputtype AS inputType,
-        CAST(IF(wep.inputtype = 'item-linker', wep.`options`->>'$.linkTypeNumber', wep.`options`->>'$.entityType') AS CHAR) AS type,
-        IF(
-            wep.inputtype = 'item-linker',
-            IF(
-                wep.`options`->>'$.entityTypes' IS NULL,
-                wep.`options`->>'$.linkTypeNumber',
-                REPLACE(REPLACE(REPLACE(REPLACE(wep.`options`->> '$.entityTypes', '[', ''), ']', ''), '""', '' ), ', ', ',')
-            ),
-            wep.`options`->>'$.entityType'
-        ) AS entityTypes,
-        IF(wep.inputtype = 'item-linker', wep.`options`->>'$.moduleId', 0) AS moduleId
-    FROM wiser_entity we
-    JOIN wiser_entityproperty wep ON wep.inputtype IN ('item-linker', 'sub-entities-grid')
-    WHERE
-        FIND_IN_SET(wep.entity_name, we.accepted_childtypes) > 0
-        AND IF(@_module_list = '', 1 = 1, FIND_IN_SET(wep.module_id, @_module_list) > 0)
-) t
-GROUP BY t.type
-ORDER BY t.type");
-
                 TemplateQueryStrings.Add("GET_MODULES", @"SELECT id, name as moduleName
 FROM wiser_module
 ORDER BY name ASC;
 ");
-                TemplateQueryStrings.Add("GET_MODULE_ROLES", @"
-SELECT
-	permission.id AS `permission_id`,
-	role.id AS `role_id`,
-	role.role_name,
-	module.id AS `module_id`,
-	module.name AS module_name
-FROM wiser_roles AS role
-LEFT JOIN wiser_permission AS permission ON role.id = permission.role_id
-LEFT JOIN wiser_module AS module ON permission.module_id = module.id
-WHERE role.id = {role_id}");
-                TemplateQueryStrings.Add("DELETE_MODULE_RIGHT_ASSIGNMENT", @"DELETE FROM `wiser_system`.`wiser_permission`
-WHERE role_id = {role_id} AND module_id={module_id}");
-
-                TemplateQueryStrings.Add("IMPORTEXPORT_GET_ENTITY_PROPERTIES", @"SELECT property.`name`, property.`value`, property.languageCode, property.isImageField, property.allowMultipleImages
-FROM (
-    SELECT 'Item naam' AS `name`, 'itemTitle' AS `value`, '' AS languageCode, 0 AS isImageField, 0 AS allowMultipleImages, 0 AS baseOrder
-    FROM DUAL
-    WHERE '{entityName}' NOT LIKE '{%}' AND '{entityName}' <> ''
-    UNION
-    SELECT
-        CONCAT(
-            IF(display_name = '', property_name, display_name),
-            IF(
-                language_code <> '',
-                CONCAT(' (', language_code, ')'),
-                ''
-            )
-        ) AS `name`,
-        IF(property_name = '', display_name, property_name) AS `value`,
-        language_code AS languageCode,
-        inputtype = 'image-upload' AS isImageField,
-        IFNULL(JSON_UNQUOTE(JSON_EXTRACT(NULLIF(`options`, ''), '$.multiple')), 'true') = 'true' AS allowMultipleImages,
-        1 AS baseOrder
-    FROM wiser_entityproperty
-    WHERE entity_name = '{entityName}'
-    OR ('{linkType}' > 0 AND link_type = '{linkType}')
-    ORDER BY baseOrder, `name`
-) AS property");
                 TemplateQueryStrings.Add("GET_ROLE_RIGHTS", @"SELECT
 	properties.id AS `propertyId`,
 	properties.entity_name AS `entityName`,
 	properties.display_name as `displayName`,
     properties.tab_name AS `tabName`,
     properties.group_name AS `groupName`,
-	IFNULL(permissions.permissions, 15) AS `permission`,
+	IFNULL(permissions.permissions, 0) AS `permission`,
     {roleId} AS `roleId`
 FROM `wiser_entityproperty` AS properties
 LEFT JOIN `wiser_permission` AS permissions ON permissions.entity_property_id = properties.id AND permissions.role_id = {roleId}
@@ -1505,7 +792,7 @@ ORDER BY properties.entity_name, properties.tab_name, properties.group_name, pro
 	role.role_name AS `roleName`,
 	module.id AS `moduleId`,
 	IFNULL(module.name, CONCAT('ModuleID: ',module.id)) AS `moduleName`,
-	IFNULL(permission.permissions, 15) AS `permission`
+	IFNULL(permission.permissions, 0) AS `permission`
 FROM wiser_module AS module
 JOIN wiser_roles AS role ON role.id = {roleId}
 LEFT JOIN wiser_permission AS permission ON role.id = permission.role_id AND permission.module_id = module.id
@@ -1541,6 +828,7 @@ SELECT
     dataSelector.show_in_communication_module AS showInCommunicationModule,
     dataSelector.available_for_rendering AS availableForRendering,
     dataSelector.show_in_dashboard AS showInDashboard,
+    dataSelector.available_for_branches AS availableForBranches,
     IFNULL(GROUP_CONCAT(permission.role_id), '') AS allowedRoles
 FROM wiser_data_selector AS dataSelector
 LEFT JOIN wiser_permission AS permission ON permission.data_selector_id = dataSelector.id
@@ -1998,49 +1286,6 @@ AND (@_linkTypeNumber = '' OR il.type = @_linkTypeNumber)
 GROUP BY il.item_id, id2.id
 
 ORDER BY ordering, title");
-                TemplateQueryStrings.Add("GET_ITEM_FILES_AND_DIRECTORIES", @"SET @parent = IF('{id}' = '' OR '{id}' LIKE '{%}', '{rootId:decrypt(true)}', '{id:decrypt(true)}');
-
-SELECT
-	id AS id_encrypt_withdate,
-    id AS plainId,
-	file_name AS name,
-	content_type AS contentType,
-	0 AS isDirectory,
-	0 AS childrenCount,
-    property_name AS propertyName,
-    item_id AS itemId_encrypt_withdate,
-    item_id AS itemIdPlain,
-    CASE
-        WHEN content_type LIKE 'image/%' THEN 'image'
-        WHEN content_type = 'text/html' THEN 'html'
-        ELSE 'file'
-    END AS spriteCssClass,
-    IF(content_type IN('text/html', 'application/octet-stream'), CONVERT(content USING utf8), '') AS html
-FROM wiser_itemfile
-WHERE item_id = @parent
-
-UNION ALL
-
-SELECT
-	item.id AS id_encrypt_withdate,
-    item.id AS plainId,
-	item.title AS name,
-	'' AS contentType,
-	1 AS isDirectory,
-	COUNT(DISTINCT subItem.id) + COUNT(DISTINCT file.id) AS childrenCount,
-    '' AS property_name,
-	item.id AS itemId_encrypt_withdate,
-    item.id AS itemIdPlain,
-    'wiserfolderclosed' AS spriteCssClass,
-    '' AS html
-FROM wiser_item AS item
-LEFT JOIN wiser_item AS subItem ON subItem.entity_type = 'filedirectory' AND subItem.parent_item_id = item.id
-LEFT JOIN wiser_itemfile AS file ON file.item_id = item.id
-WHERE item.entity_type = 'filedirectory'
-AND item.parent_item_id = @parent
-GROUP BY item.id
-
-ORDER BY isDirectory DESC, name ASC");
 
                 TemplateQueryStrings.Add("GET_DATA_FROM_ENTITY_QUERY", @"SET @_itemId = {myItemId};
 SET @entityproperty_id = {propertyid};
@@ -2214,7 +1459,10 @@ LIMIT 1";
             }
 
             templateData.PublishedEnvironments = templateEnvironmentsResult.ModelObject;
-            templateDataService.DecryptEditorValueIfEncrypted((await wiserCustomersService.GetEncryptionKey(identity, true)).ModelObject, templateData);
+            var encryptionKey = (await wiserCustomersService.GetEncryptionKey(identity, true)).ModelObject;
+            // TODO: Remove this log once we figured out why encrypting/decrypting the XML takes does not work properly on main.wiser3.nl.
+            logger.LogDebug($"Encrypting template value for template ID {templateId}, sub domain {IdentityHelpers.GetSubDomain(identity)}, user ID: {IdentityHelpers.GetWiserUserId(identity)}, encryption key: {encryptionKey}");
+            templateDataService.DecryptEditorValueIfEncrypted(encryptionKey, templateData);
 
             return new ServiceResult<TemplateSettingsModel>(templateData);
         }
@@ -2274,6 +1522,9 @@ LIMIT 1";
                         break;
                     }
                 }
+
+                // Create a new version of the template, so that any changes made after this will be done in the new version instead of the published one.
+                await CreateNewVersionAsync(template.TemplateId, version);
             }
 
             var newPublished = PublishedEnvironmentHelper.CalculateEnvironmentsToPublish(currentPublished, version, environment);
@@ -2284,7 +1535,7 @@ LIMIT 1";
         }
 
         /// <inheritdoc />
-        public async Task<ServiceResult<bool>> SaveTemplateVersionAsync(ClaimsIdentity identity, TemplateSettingsModel template, bool skipCompilation = false)
+        public async Task<ServiceResult<bool>> SaveAsync(ClaimsIdentity identity, TemplateSettingsModel template, bool skipCompilation = false)
         {
             if (template == null)
             {
@@ -2369,12 +1620,16 @@ LIMIT 1";
                     template.MinifiedValue = template.EditorValue;
                     break;
                 case TemplateTypes.Xml:
-                    if (!template.EditorValue.StartsWith("<Configuration>") && !template.EditorValue.StartsWith("<OAuthConfiguration>"))
+                    var trimmedValue = template.EditorValue.Trim();
+                    if (!trimmedValue.StartsWith("<Configuration>", StringComparison.OrdinalIgnoreCase) && !trimmedValue.StartsWith("<OAuthConfiguration>", StringComparison.OrdinalIgnoreCase))
                     {
                         break;
                     }
 
-                    template.EditorValue = template.EditorValue.EncryptWithAes((await wiserCustomersService.GetEncryptionKey(identity, true)).ModelObject, useSlowerButMoreSecureMethod: true);
+                    var encryptionKey = (await wiserCustomersService.GetEncryptionKey(identity, true)).ModelObject;
+                    // TODO: Remove this log once we figured out why encrypting/decrypting the XML takes does not work properly on main.wiser3.nl.
+                    logger.LogDebug($"Encrypting template value for template ID {template.TemplateId}, sub domain {IdentityHelpers.GetSubDomain(identity)}, user ID: {IdentityHelpers.GetWiserUserId(identity)}, encryption key: {encryptionKey}");
+                    template.EditorValue = trimmedValue.EncryptWithAes(encryptionKey, useSlowerButMoreSecureMethod: true);
 
                     break;
             }
@@ -2404,10 +1659,26 @@ LIMIT 1";
             var templates = await templateDataService.GetScssTemplatesThatAreNotIncludesAsync(template.TemplateId);
             foreach (var otherTemplate in templates)
             {
-                await SaveTemplateVersionAsync(identity, otherTemplate);
+                await SaveAsync(identity, otherTemplate);
             }
 
             return new ServiceResult<bool>(true);
+        }
+
+        /// <inheritdoc />
+        public async Task<ServiceResult<int>> CreateNewVersionAsync(int templateId, int versionBeingDeployed = 0)
+        {
+            // ReSharper disable once InvertIf
+            if (versionBeingDeployed > 0)
+            {
+                var latestVersion = await templateDataService.GetLatestVersionAsync(templateId);
+                if (versionBeingDeployed != latestVersion.Version)
+                {
+                    return new ServiceResult<int>(0);
+                }
+            }
+
+            return new ServiceResult<int>(await templateDataService.CreateNewVersionAsync(templateId));
         }
 
         /// <inheritdoc />
@@ -2428,6 +1699,10 @@ LIMIT 1";
 
             // Make sure the ordering is correct.
             await templateDataService.FixTreeViewOrderingAsync(parentId);
+
+            // Do any table updates that might be needed.
+            await templateDataService.KeepTablesUpToDateAsync();
+            await dynamicContentDataService.KeepTablesUpToDateAsync();
 
             // Get templates in correct order.
             var rawSection = await templateDataService.GetTreeViewSectionAsync(parentId);
@@ -2463,7 +1738,6 @@ LIMIT 1";
                 }
             }
 
-            var helper = new TreeViewHelper();
             var convertedList = rawSection.Select(TreeViewHelper.ConvertTemplateTreeViewDaoToTemplateTreeViewModel).ToList();
 
             return new ServiceResult<List<TemplateTreeViewModel>>(convertedList);
@@ -2477,7 +1751,7 @@ LIMIT 1";
         }
 
         /// <inheritdoc />
-        public async Task<ServiceResult<TemplateHistoryOverviewModel>> GetTemplateHistoryAsync(ClaimsIdentity identity, int templateId)
+        public async Task<ServiceResult<TemplateHistoryOverviewModel>> GetTemplateHistoryAsync(ClaimsIdentity identity, int templateId, int pageNumber, int itemsPerPage)
         {
             if (templateId <= 0)
             {
@@ -2497,14 +1771,14 @@ LIMIT 1";
             var dynamicContentHistory = new Dictionary<DynamicContentOverviewModel, List<HistoryVersionModel>>();
             foreach (var dc in dynamicContentOverview.ModelObject)
             {
-                dynamicContentHistory.Add(dc, (await historyService.GetChangesInComponentAsync(dc.Id)).ModelObject);
+                dynamicContentHistory.Add(dc, (await historyService.GetChangesInComponentAsync(dc.Id, pageNumber, itemsPerPage)).ModelObject);
             }
 
             var overview = new TemplateHistoryOverviewModel
             {
                 TemplateId = templateId,
-                TemplateHistory = await historyService.GetVersionHistoryFromTemplate(identity, templateId, dynamicContentHistory),
-                PublishHistory = await historyService.GetPublishHistoryFromTemplate(templateId),
+                TemplateHistory = await historyService.GetVersionHistoryFromTemplate(identity, templateId, dynamicContentHistory, pageNumber, itemsPerPage),
+                PublishHistory = await historyService.GetPublishHistoryFromTemplate(templateId, pageNumber, itemsPerPage),
                 PublishedEnvironment = (await GetTemplateEnvironmentsAsync(templateId)).ModelObject
             };
 
@@ -2562,7 +1836,7 @@ LIMIT 1";
 
             if (templateDataResponse.ModelObject.Type is not (TemplateTypes.View or TemplateTypes.Routine or TemplateTypes.Trigger))
             {
-                return await SaveTemplateVersionAsync(identity, templateDataResponse.ModelObject);
+                return await SaveAsync(identity, templateDataResponse.ModelObject);
             }
 
             // Also rename the view, routine, or trigger that this template is managing.
@@ -2579,7 +1853,7 @@ LIMIT 1";
                     break;
             }
 
-            return await SaveTemplateVersionAsync(identity, templateDataResponse.ModelObject);
+            return await SaveAsync(identity, templateDataResponse.ModelObject);
         }
 
         /// <inheritdoc />
@@ -2615,7 +1889,7 @@ LIMIT 1";
 
                 if (templateTree.HasChildren)
                 {
-                    templateTree.ChildNodes = (await GetEntireTreeViewStructureAsync(identity, templateTree.TemplateId, remainingStartFrom, environment)).ModelObject; 
+                    templateTree.ChildNodes = (await GetEntireTreeViewStructureAsync(identity, templateTree.TemplateId, remainingStartFrom, environment)).ModelObject;
                 }
                 else
                 {
@@ -2686,7 +1960,7 @@ LIMIT 1";
             var ombouw = (!queryString.ContainsKey("ombouw") || !String.Equals(queryString["ombouw"].ToString(), "false", StringComparison.OrdinalIgnoreCase)) && !String.Equals(requestModel.PreviewVariables.FirstOrDefault(v => String.Equals(v.Key, "ombouw", StringComparison.OrdinalIgnoreCase))?.Value, "false", StringComparison.OrdinalIgnoreCase);
 
             await SetupGclForPreviewAsync(identity, requestModel);
-            
+
             var contentToWrite = new StringBuilder();
 
             // Execute the pre load query before any replacements are being done and before any dynamic components are handled.
@@ -2738,7 +2012,7 @@ LIMIT 1";
                 var cssBuilder = new StringBuilder();
                 cssBuilder.AppendLine((await gclTemplatesService.GetGeneralTemplateValueAsync(TemplateTypes.Css)).Content);
                 cssBuilder.AppendLine(viewModel.Css.PageInlineHeadCss);
-                
+
                 var regex = new Regex("/css/gclcss_(.*).css", RegexOptions.Compiled | RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(200));
                 var match = regex.Match(viewModel.Css.PageStandardCssFileName ?? "");
                 if (match.Success)
@@ -2748,7 +2022,7 @@ LIMIT 1";
                 }
 
                 viewModel.Css.PageStandardCssFileName = null;
-                
+
                 match = regex.Match(viewModel.Css.PageAsyncFooterCssFileName ?? "");
                 if (match.Success)
                 {
@@ -2757,7 +2031,7 @@ LIMIT 1";
                 }
 
                 viewModel.Css.PageAsyncFooterCssFileName = null;
-                
+
                 match = regex.Match(viewModel.Css.PageSyncFooterCssFileName ?? "");
                 if (match.Success)
                 {
@@ -2784,7 +2058,7 @@ LIMIT 1";
                 }
 
                 viewModel.Javascript.PageStandardJavascriptFileName = null;
-                
+
                 match = regex.Match(viewModel.Javascript.GeneralAsyncFooterJavaScriptFileName ?? "");
                 if (match.Success)
                 {
@@ -2817,7 +2091,7 @@ LIMIT 1";
                 }
 
                 viewModel.Javascript.PageAsyncFooterJavascriptFileName = null;
-                
+
                 match = regex.Match(viewModel.Javascript.PageSyncFooterJavascriptFileName ?? "");
                 if (match.Success)
                 {
@@ -2863,7 +2137,7 @@ LIMIT 1";
             finalResult = finalResult.ReplaceCaseInsensitive("<head>", $"<head><base href='{AddMainDomainToUrl("/", mainDomain)}'>");
             return new ServiceResult<string>(finalResult);
         }
-        
+
         /// <inheritdoc />
         public async Task<ServiceResult<string>> CheckDefaultHeaderConflict(int templateId, string regexString)
         {
@@ -2966,7 +2240,7 @@ LIMIT 1";
                 SELECT template.template_name
                 FROM {WiserTableNames.WiserTemplate} AS template
                 JOIN (SELECT template_id, MAX(version) AS maxVersion FROM {WiserTableNames.WiserTemplate} GROUP BY template_id) AS maxVersion ON template.template_id = maxVersion.template_id AND template.version = maxVersion.maxVersion
-                WHERE template.template_type = 1 AND template.removed = 0 AND template.`{fieldName}` = 1 AND template.template_id <> ?templateId {regexWherePart}
+                WHERE template.template_type = {(int)TemplateTypes.Html} AND template.removed = 0 AND template.`{fieldName}` = 1 AND template.template_id <> ?templateId {regexWherePart}
                 GROUP BY template.template_id
                 LIMIT 1";
 
@@ -3183,7 +2457,6 @@ WHERE template.templatetype IS NULL OR template.templatetype <> 'normal'";
                 clientDatabaseConnection.AddParameter("changed_on", reader.GetValue("changed_on"));
                 clientDatabaseConnection.AddParameter("changed_by", reader.GetValue("changed_by"));
                 clientDatabaseConnection.AddParameter("published_environment", reader.GetValue("published_environment"));
-                clientDatabaseConnection.AddParameter("use_cache", reader.GetValue("use_cache"));
                 clientDatabaseConnection.AddParameter("cache_minutes", reader.GetValue("cache_minutes"));
                 clientDatabaseConnection.AddParameter("login_required", reader.GetValue("login_required"));
                 clientDatabaseConnection.AddParameter("login_session_prefix", reader.GetValue("login_session_prefix"));
@@ -3238,10 +2511,10 @@ WHERE template.templatetype IS NULL OR template.templatetype <> 'normal'";
                 {
                     ModelObject = false,
                     StatusCode = HttpStatusCode.BadRequest,
-                    ErrorMessage = "The current branch is not the main branch. This functionality can only be used from the main branch." 
+                    ErrorMessage = "The current branch is not the main branch. This functionality can only be used from the main branch."
                 };
             }
-            
+
             // Check if the branch exists.
             var branchToDeploy = (await wiserCustomersService.GetSingleAsync(branchId, true)).ModelObject;
             if (branchToDeploy == null)
@@ -3250,7 +2523,7 @@ WHERE template.templatetype IS NULL OR template.templatetype <> 'normal'";
                 {
                     ModelObject = false,
                     StatusCode = HttpStatusCode.NotFound,
-                    ErrorMessage = $"Branch with ID {branchId} does not exist" 
+                    ErrorMessage = $"Branch with ID {branchId} does not exist"
                 };
             }
 
@@ -3261,7 +2534,7 @@ WHERE template.templatetype IS NULL OR template.templatetype <> 'normal'";
                 {
                     ModelObject = false,
                     StatusCode = HttpStatusCode.BadRequest,
-                    ErrorMessage = $"You don't have permissions to access a branch with ID {branchId}" 
+                    ErrorMessage = $"You don't have permissions to access a branch with ID {branchId}"
                 };
             }
 
@@ -3324,7 +2597,7 @@ WHERE template.templatetype IS NULL OR template.templatetype <> 'normal'";
             var testRenderingSettings = await objectsService.FindSystemObjectByDomainNameAsync($"log_rendering_of_{name}_test");
             var acceptanceRenderingSettings = await objectsService.FindSystemObjectByDomainNameAsync($"log_rendering_of_{name}_acceptance");
             var liveRenderingSettings = await objectsService.FindSystemObjectByDomainNameAsync($"log_rendering_of_{name}_live");
-            
+
             var logAllRendering = await objectsService.FindSystemObjectByDomainNameAsync($"log_rendering_of_{name}");
             if (String.IsNullOrWhiteSpace(developmentRenderingSettings))
             {
@@ -3350,7 +2623,7 @@ WHERE template.templatetype IS NULL OR template.templatetype <> 'normal'";
                 result.MeasureRenderTimesOnDevelopmentForEverything = String.Equals(developmentRenderingSettings, "true", StringComparison.OrdinalIgnoreCase)
                                                                       || String.Equals(developmentRenderingSettings, "all", StringComparison.OrdinalIgnoreCase);
             }
-            
+
             if (!String.IsNullOrWhiteSpace(testRenderingSettings))
             {
                 var ids = testRenderingSettings.Split(",").Select(value => !Int32.TryParse(value, out var id) ? 0 : id);
@@ -3358,7 +2631,7 @@ WHERE template.templatetype IS NULL OR template.templatetype <> 'normal'";
                 result.MeasureRenderTimesOnTestForEverything = String.Equals(testRenderingSettings, "true", StringComparison.OrdinalIgnoreCase)
                                                                || String.Equals(testRenderingSettings, "all", StringComparison.OrdinalIgnoreCase);
             }
-            
+
             if (!String.IsNullOrWhiteSpace(acceptanceRenderingSettings))
             {
                 var ids = acceptanceRenderingSettings.Split(",").Select(value => !Int32.TryParse(value, out var id) ? 0 : id);
@@ -3366,7 +2639,7 @@ WHERE template.templatetype IS NULL OR template.templatetype <> 'normal'";
                 result.MeasureRenderTimesOnAcceptanceForEverything = String.Equals(acceptanceRenderingSettings, "true", StringComparison.OrdinalIgnoreCase)
                                                                      || String.Equals(acceptanceRenderingSettings, "all", StringComparison.OrdinalIgnoreCase);
             }
-            
+
             if (!String.IsNullOrWhiteSpace(liveRenderingSettings))
             {
                 var ids = liveRenderingSettings.Split(",").Select(value => !Int32.TryParse(value, out var id) ? 0 : id);
@@ -3398,7 +2671,7 @@ WHERE template.templatetype IS NULL OR template.templatetype <> 'normal'";
                     ErrorMessage = "Cannot change these settings, because they are enabled globally."
                 };
             }
-            
+
             // Get the current settings from database.
             var name = templateId > 0 ? "templates" : "components";
             var developmentRenderingSettings = await objectsService.FindSystemObjectByDomainNameAsync($"log_rendering_of_{name}_development");
@@ -3446,7 +2719,7 @@ WHERE template.templatetype IS NULL OR template.templatetype <> 'normal'";
             {
                 if (testIds.Contains(templateId)) testIds.Remove(templateId);
             }
-            
+
             if (settings.MeasureRenderTimesOnAcceptanceForCurrent)
             {
                 if (!acceptanceIds.Contains(templateId)) acceptanceIds.Add(templateId);
@@ -3455,7 +2728,7 @@ WHERE template.templatetype IS NULL OR template.templatetype <> 'normal'";
             {
                 if (acceptanceIds.Contains(templateId)) acceptanceIds.Remove(templateId);
             }
-            
+
             if (settings.MeasureRenderTimesOnLiveForCurrent)
             {
                 if (!liveIds.Contains(templateId)) liveIds.Add(templateId);
@@ -3480,7 +2753,7 @@ WHERE template.templatetype IS NULL OR template.templatetype <> 'normal'";
         /// <inheritdoc />
         public async Task<ServiceResult<List<RenderLogModel>>> GetRenderLogsAsync(int templateId, int version = 0,
             string urlRegex = null, Environments? environment = null, ulong userId = 0,
-            string languageCode = null, int pageSize = 500, int pageNumber = 1, 
+            string languageCode = null, int pageSize = 500, int pageNumber = 1,
             bool getDailyAverage = false, DateTime? start = null, DateTime? end = null)
         {
             var results = await measurementsDataService.GetRenderLogsAsync(templateId, 0, version, urlRegex, environment, userId, languageCode, pageSize, pageNumber, getDailyAverage, start, end);
