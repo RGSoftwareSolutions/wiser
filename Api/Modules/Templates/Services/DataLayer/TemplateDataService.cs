@@ -1416,6 +1416,15 @@ AND otherVersion.id IS NULL";
         }
 
         /// <inheritdoc />
+        public Task<string> DecryptXml(string encryptionKey, string xml)
+        {
+            if (!String.IsNullOrWhiteSpace(xml) && !xml.Trim().StartsWith("<"))
+            {
+                return Task.FromResult<string>(xml.DecryptWithAes(encryptionKey, useSlowerButMoreSecureMethod: true));
+            }
+        }
+
+        /// <inheritdoc />
         public async Task DeployToBranchAsync(List<int> templateIds, string branchDatabaseName)
         {
             // Branches always exist within the same database cluster, so we don't need to make a new connection for it.
