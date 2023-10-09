@@ -1513,6 +1513,7 @@ LIMIT 1";
 
             // Parse the xml
             var templateXml = await templateDataService.ParseXml(decryptedXml);
+            // Re-add the id since we lose it during parsing
             
             // Add the available input values to the xml
             templateDataService.AddInputValues(templateXml);
