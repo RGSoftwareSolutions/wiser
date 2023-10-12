@@ -1461,9 +1461,7 @@ LIMIT 1";
 
             templateData.PublishedEnvironments = templateEnvironmentsResult.ModelObject;
             var encryptionKey = (await wiserCustomersService.GetEncryptionKey(identity, true)).ModelObject;
-            // TODO: Remove this log once we figured out why encrypting/decrypting the XML takes does not work properly on main.wiser3.nl.
-            logger.LogDebug($"Encrypting template value for template ID {templateId}, sub domain {IdentityHelpers.GetSubDomain(identity)}, user ID: {IdentityHelpers.GetWiserUserId(identity)}, encryption key: {encryptionKey}");
-            templateData.EditorValue = templateDataService.DecryptEditorValueIfEncrypted(encryptionKey, templateData);
+            templateDataService.DecryptEditorValueIfEncrypted(encryptionKey, templateData);
 
             return new ServiceResult<TemplateSettingsModel>(templateData);
         }
@@ -1697,8 +1695,6 @@ LIMIT 1";
                     }
 
                     var encryptionKey = (await wiserCustomersService.GetEncryptionKey(identity, true)).ModelObject;
-                    // TODO: Remove this log once we figured out why encrypting/decrypting the XML takes does not work properly on main.wiser3.nl.
-                    logger.LogDebug($"Encrypting template value for template ID {template.TemplateId}, sub domain {IdentityHelpers.GetSubDomain(identity)}, user ID: {IdentityHelpers.GetWiserUserId(identity)}, encryption key: {encryptionKey}");
                     template.EditorValue = trimmedValue.EncryptWithAes(encryptionKey, useSlowerButMoreSecureMethod: true);
 
                     break;
@@ -1742,7 +1738,7 @@ LIMIT 1";
             if (versionBeingDeployed > 0)
             {
                 var latestVersion = await templateDataService.GetLatestVersionAsync(templateId);
-                if (versionBeingDeployed != latestVersion.Version)
+                if (versionBeingDeployed != latestVersion.Version || latestVersion.Removed)
                 {
                     return new ServiceResult<int>(0);
                 }

@@ -960,6 +960,11 @@ CREATE TRIGGER `QueryInsert` AFTER INSERT ON `wiser_query` FOR EACH ROW BEGIN
         INSERT INTO wiser_history (action, tablename, item_id, changed_by, field, oldvalue, newvalue)
         VALUES ('UPDATE_QUERY', 'wiser_query', NEW.id, IFNULL(@_username, USER()), 'show_in_export_module', NULL, NEW.`show_in_export_module`);
     END IF;
+
+    IF IFNULL(NEW.`show_in_communication_module`, '') <> '' THEN
+        INSERT INTO wiser_history (action, tablename, item_id, changed_by, field, oldvalue, newvalue)
+        VALUES ('UPDATE_QUERY', 'wiser_query', NEW.id, IFNULL(@_username, USER()), 'show_in_communication_module', NULL, NEW.`show_in_communication_module`);
+    END IF;
 END;
 
 DROP TRIGGER IF EXISTS `QueryUpdate`;
@@ -977,6 +982,11 @@ CREATE TRIGGER `QueryUpdate` AFTER UPDATE ON `wiser_query` FOR EACH ROW BEGIN
     IF IFNULL(NEW.`show_in_export_module`, '') <> IFNULL(OLD.`show_in_export_module`, '') THEN
         INSERT INTO wiser_history (action, tablename, item_id, changed_by, field, oldvalue, newvalue)
         VALUES ('UPDATE_QUERY', 'wiser_query', NEW.id, IFNULL(@_username, USER()), 'show_in_export_module', OLD.`show_in_export_module`, NEW.`show_in_export_module`);
+    END IF;
+
+    IF IFNULL(NEW.`show_in_communication_module`, '') <> IFNULL(OLD.`show_in_communication_module`, '') THEN
+        INSERT INTO wiser_history (action, tablename, item_id, changed_by, field, oldvalue, newvalue)
+        VALUES ('UPDATE_QUERY', 'wiser_query', NEW.id, IFNULL(@_username, USER()), 'show_in_communication_module', OLD.`show_in_communication_module`, NEW.`show_in_communication_module`);
     END IF;
 END;
 
@@ -1118,6 +1128,11 @@ CREATE TRIGGER `EntityInsert` AFTER INSERT ON `wiser_entity` FOR EACH ROW BEGIN
         INSERT INTO wiser_history (action, tablename, item_id, changed_by, field, oldvalue, newvalue)
         VALUES ('UPDATE_ENTITY', 'wiser_entity', NEW.id, IFNULL(@_username, USER()), 'dedicated_table_prefix', NULL, NEW.`dedicated_table_prefix`);
     END IF;
+
+    IF IFNULL(NEW.`store_type`, '') <> '' THEN
+        INSERT INTO wiser_history (action, tablename, item_id, changed_by, field, oldvalue, newvalue)
+        VALUES ('UPDATE_ENTITY', 'wiser_entity', NEW.id, IFNULL(@_username, USER()), 'store_type', NULL, NEW.`store_type`);
+    END IF;
 END;
 
 DROP TRIGGER IF EXISTS `EntityUpdate`;
@@ -1245,6 +1260,11 @@ CREATE TRIGGER `EntityUpdate` AFTER UPDATE ON `wiser_entity` FOR EACH ROW BEGIN
     IF IFNULL(NEW.`dedicated_table_prefix`, '') <> IFNULL(OLD.`dedicated_table_prefix`, '') THEN
         INSERT INTO wiser_history (action, tablename, item_id, changed_by, field, oldvalue, newvalue)
         VALUES ('UPDATE_ENTITY', 'wiser_entity', NEW.id, IFNULL(@_username, USER()), 'dedicated_table_prefix', OLD.`dedicated_table_prefix`, NEW.`dedicated_table_prefix`);
+    END IF;
+
+    IF IFNULL(NEW.`store_type`, '') <> IFNULL(OLD.`store_type`, '') THEN
+        INSERT INTO wiser_history (action, tablename, item_id, changed_by, field, oldvalue, newvalue)
+        VALUES ('UPDATE_ENTITY', 'wiser_entity', NEW.id, IFNULL(@_username, USER()), 'store_type', OLD.`store_type`, NEW.`store_type`);
     END IF;
 END;
 
@@ -1664,6 +1684,11 @@ CREATE TRIGGER `DataSelectorInsert` AFTER INSERT ON `wiser_data_selector` FOR EA
         INSERT INTO wiser_history (action, tablename, item_id, changed_by, field, oldvalue, newvalue)
         VALUES ('UPDATE_DATA_SELECTOR', 'wiser_data_selector', NEW.id, IFNULL(@_username, USER()), 'show_in_dashboard', NULL, NEW.`show_in_dashboard`);
     END IF;
+    
+    IF IFNULL(NEW.`available_for_branches`, '') <> '' THEN
+        INSERT INTO wiser_history (action, tablename, item_id, changed_by, field, oldvalue, newvalue)
+        VALUES ('UPDATE_DATA_SELECTOR', 'wiser_data_selector', NEW.id, IFNULL(@_username, USER()), 'available_for_branches', NULL, NEW.`available_for_branches`);
+    END IF;
 END;
 
 DROP TRIGGER IF EXISTS `DataSelectorUpdate`;
@@ -1701,6 +1726,11 @@ CREATE TRIGGER `DataSelectorUpdate` AFTER UPDATE ON `wiser_data_selector` FOR EA
     IF IFNULL(NEW.`show_in_dashboard`, '') <> IFNULL(OLD.`show_in_dashboard`, '') THEN
         INSERT INTO wiser_history (action, tablename, item_id, changed_by, field, oldvalue, newvalue)
         VALUES ('UPDATE_DATA_SELECTOR', 'wiser_data_selector', NEW.id, IFNULL(@_username, USER()), 'show_in_dashboard', OLD.`show_in_dashboard`, NEW.`show_in_dashboard`);
+    END IF;
+    
+    IF IFNULL(NEW.`available_for_branches`, '') <> IFNULL(OLD.`available_for_branches`, '') THEN
+        INSERT INTO wiser_history (action, tablename, item_id, changed_by, field, oldvalue, newvalue)
+        VALUES ('UPDATE_DATA_SELECTOR', 'wiser_data_selector', NEW.id, IFNULL(@_username, USER()), 'available_for_branches', OLD.`available_for_branches`, NEW.`available_for_branches`);
     END IF;
 END;
 
