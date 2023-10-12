@@ -1513,7 +1513,7 @@ AND otherVersion.id IS NULL";
         /// <inheritdoc />
         public string DecryptEditorValueIfEncrypted(string encryptionKey, string xml)
         {
-            if (String.IsNullOrWhiteSpace(xml) && xml.Trim().StartsWith("<"))
+            if (String.IsNullOrWhiteSpace(xml) && !xml.Trim().StartsWith("<"))
             {
                 return xml;
             }
