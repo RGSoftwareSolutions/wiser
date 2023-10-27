@@ -13,6 +13,7 @@ using Api.Modules.Templates.Models.Measurements;
 using Api.Modules.Templates.Models.Other;
 using Api.Modules.Templates.Models.Preview;
 using Api.Modules.Templates.Models.Template;
+using Api.Modules.Templates.Models.Template.WtsModels;
 using GeeksCoreLibrary.Core.Enums;
 using GeeksCoreLibrary.Core.Extensions;
 using GeeksCoreLibrary.Core.Models;
