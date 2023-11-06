@@ -1,67 +1,123 @@
 ﻿(function() {
+var container = $("#container_{propertyIdWithSuffix}");
+var defaultField = $("#field_{propertyIdWithSuffix}");
+var windowField = $("#field_window_{propertyIdWithSuffix}");
 var readonly = {readonly};
 
 var imageTool = {
 	name: "wiserImage",
 	tooltip: "Afbeelding toevoegen",
-	exec: function(e) { window.dynamicItems.fields.onHtmlEditorImageExec.call(window.dynamicItems.fields, e, $(this).data("kendoEditor")); }
+    ui: {
+        type: "button",
+        text: "Afbeelding toevoegen",
+        icon: "image"
+    },
+	exec: function(e) { window.dynamicItems.fields.onHtmlEditorImageExec.call(window.dynamicItems.fields, e, defaultField.data("kendoEditor")); }
 };
 var fileTool = {
     name: "wiserFile",
     tooltip: "Link naar bestand toevoegen",
-    exec: function(e) { window.dynamicItems.fields.onHtmlEditorFileExec.call(window.dynamicItems.fields, e, $(this).data("kendoEditor")); }
+    ui: {
+        type: "button",
+        text: "Link naar bestand toevoegen",
+        icon: "file"
+    },
+    exec: function(e) { window.dynamicItems.fields.onHtmlEditorFileExec.call(window.dynamicItems.fields, e, defaultField.data("kendoEditor")); }
 };
 var templateTool = {
 	name: "wiserTemplate",
 	tooltip: "Template toevoegen",
-	exec: function(e) { window.dynamicItems.fields.onHtmlEditorTemplateExec.call(window.dynamicItems.fields, e, $(this).data("kendoEditor")); }
+    ui: {
+        type: "button",
+        text: "Template toevoegen",
+        icon: "template-manager"
+    },
+	exec: function(e) { window.dynamicItems.fields.onHtmlEditorTemplateExec.call(window.dynamicItems.fields, e, defaultField.data("kendoEditor")); }
 };
 var htmlSourceTool = {
 	name: "wiserHtmlSource",
 	tooltip: "HTML bekijken/aanpassen",
-	exec: function(e) { window.dynamicItems.fields.onHtmlEditorHtmlSourceExec.call(window.dynamicItems.fields, e, $(this).data("kendoEditor"), "{itemId}"); }
+    ui: {
+        type: "button",
+        text: "HTML bekijken/aanpassen",
+        icon: "code"
+    },
+	exec: function(e) { window.dynamicItems.fields.onHtmlEditorHtmlSourceExec.call(window.dynamicItems.fields, e, defaultField.data("kendoEditor"), "{itemId}"); }
 };
 var maximizeTool = {
 	name: "wiserMaximizeEditor",
 	tooltip: "Vergroten",
-	exec: function(e) { window.dynamicItems.fields.onHtmlEditorFullScreenExec.call(window.dynamicItems.fields, e, $(this).data("kendoEditor"), "{itemId}"); }
+    ui: {
+        type: "button",
+        text: "Vergroten",
+        icon: "window"
+    },
+	exec: function(e) { window.dynamicItems.fields.onHtmlEditorFullScreenExec.call(window.dynamicItems.fields, e, defaultField.data("kendoEditor"), "{itemId}"); }
 };
 var contentBuilderToolNotable = {
     name: "wiserContentBuilder",
     tooltip: "Content builder",
     template: "<button id='contentBuilder_{propertyIdWithSuffix}' tabindex='0' role='button' class='k-button k-tool k-group-start k-group-end content-builder-button' title='Content builder' aria-label='Content builder'><span class='k-icon k-i-wiser-content-builder'></span></button><label class='content-builder-label'>Content builder</label>",
-    exec: function(e) { window.dynamicItems.fields.onHtmlEditorContentBuilderExec.call(window.dynamicItems.fields, e, $(this).data("kendoEditor"), "{itemId}", "{propertyName}", "{languageCode}", "{contentBuilderMode}"); }
+    exec: function(e) { window.dynamicItems.fields.onHtmlEditorContentBuilderExec.call(window.dynamicItems.fields, e, defaultField.data("kendoEditor"), "{itemId}", "{propertyName}", "{languageCode}", "{contentBuilderMode}"); }
 };
 var contentBuilderToolBasic = {
     name: "wiserContentBuilder",
     tooltip: "Content builder",
-    exec: function(e) { window.dynamicItems.fields.onHtmlEditorContentBuilderExec.call(window.dynamicItems.fields, e, $(this).data("kendoEditor"), "{itemId}", "{propertyName}", "{languageCode}", "{contentBuilderMode}"); }
+    ui: {
+        type: "button",
+        text: "Content builder",
+        icon: "change-manually"
+    },
+    exec: function(e) { window.dynamicItems.fields.onHtmlEditorContentBuilderExec.call(window.dynamicItems.fields, e, defaultField.data("kendoEditor"), "{itemId}", "{propertyName}", "{languageCode}", "{contentBuilderMode}"); }
 };
 var entityBlockTool = {
     name: "wiserEntityBlock",
     tooltip: "Entiteit-blok",
-    exec: function(e) { window.dynamicItems.fields.onHtmlEditorEntityBlockExec.call(window.dynamicItems.fields, e, $(this).data("kendoEditor")); }
+    ui: {
+        type: "button",
+        text: "Entiteit-blok",
+        icon: "code-snippet"
+    },
+    exec: function(e) { window.dynamicItems.fields.onHtmlEditorEntityBlockExec.call(window.dynamicItems.fields, e, defaultField.data("kendoEditor")); }
 };
 var dataSelectorTool = {
     name: "wiserDataSelector",
     tooltip: "Data selector met template",
-    exec: function(e) { window.dynamicItems.fields.onHtmlEditorDataSelectorExec.call(window.dynamicItems.fields, e, $(this).data("kendoEditor")); }
+    ui: {
+        type: "button",
+        text: "Data selector met template",
+        icon: "gears"
+    },
+    exec: function(e) { window.dynamicItems.fields.onHtmlEditorDataSelectorExec.call(window.dynamicItems.fields, e, defaultField.data("kendoEditor")); }
 };
 var youTubeTool = {
     name: "wiserYouTube",
     tooltip: "YouTube video invoegen",
-    exec: function(e) { window.dynamicItems.fields.onHtmlEditorYouTubeExec.call(window.dynamicItems.fields, e, $(this).data("kendoEditor")); }
+    ui: {
+        type: "button",
+        text: "YouTube video invoegen",
+        icon: "youtube"
+    },
+    exec: function(e) { window.dynamicItems.fields.onHtmlEditorYouTubeExec.call(window.dynamicItems.fields, e, defaultField.data("kendoEditor")); }
 };
 
 var wiserApiRoot = window.dynamicItems.fields.base.settings.wiserApiRoot;
 var translationsTool = {
     name: "wiserTranslation",
     tooltip: "Vertaling invoegen",
-    exec: function(e) { Wiser.onHtmlEditorTranslationExec.call(Wiser, e, $(this).data("kendoEditor"), wiserApiRoot); }
+    ui: {
+        type: "button",
+        text: "Vertaling invoegen",
+        icon: "globe"
+    },
+    exec: function(e) { Wiser.onHtmlEditorTranslationExec.call(Wiser, e, defaultField.data("kendoEditor"), wiserApiRoot); }
 };
 
 var options = $.extend(true, {
-	resizable: true,
+	resizable: {
+        content: true,
+        toolbar: false
+    },
 	pasteCleanup: {
 		all: false,
 		css: false,
@@ -200,9 +256,6 @@ if (readonly) {
     options.tools = tools;
 }
 
-var container = $("#container_{propertyIdWithSuffix}");
-var defaultField = $("#field_{propertyIdWithSuffix}");
-var windowField = $("#field_window_{propertyIdWithSuffix}");
 var field = options.buttonMode === true ? windowField : defaultField;
 var openDialogButton = container.find(".openEditorInDialogButton");
 var closeDialogButton = container.find(".closeEditorWindowButton");
@@ -224,16 +277,16 @@ if (options.buttonMode !== true) {
     openDialogButton.hide();
 } else {
     defaultField.hide();
-    
+
     function resizeEditor(containerHeight) {
         var newHeight = containerHeight - kendoComponent.toolbar.element.outerHeight(true) - windowElement.find("footer").outerHeight(true) - 3;
         if (newHeight < 50) {
             newHeight = 50;
         }
-        
+
         kendoComponent.wrapper.css("height", newHeight);
     }
-    
+
     var editorWindow;
     openDialogButton.kendoButton({
         icon: "html",
@@ -261,29 +314,29 @@ if (options.buttonMode !== true) {
                     wrapper.remove();
                 }
             }).data("kendoWindow");
-            
+
             saveDialogButton.kendoButton({
                 click: function(closeDialogEvent) {
                     if (!editorWindow) {
                         return;
                     }
-                    
+
                     defaultField.val(kendoComponent.value());
                     editorWindow.close();
                 }
             });
-            
+
             closeDialogButton.kendoButton({
                 click: function(closeDialogEvent) {
                     if (!editorWindow) {
                         return;
                     }
-                    
+
                     kendoComponent.value(defaultField.val());
                     editorWindow.close();
                 }
             });
-            
+
             editorWindow.center().open();
         }
     });
