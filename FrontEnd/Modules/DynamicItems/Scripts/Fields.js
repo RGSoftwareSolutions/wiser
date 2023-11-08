@@ -2996,7 +2996,7 @@ export class Fields {
             click: (event) => {
                 this.onHtmlEditorImageExec(event, null, codeMirrorInstance);
             },
-            icon: "image-insert"
+            icon: "image-add"
         });
         htmlWindow.find(".addTemplate").kendoButton({
             click: () => {
