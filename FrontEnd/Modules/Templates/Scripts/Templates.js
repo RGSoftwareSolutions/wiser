@@ -7,7 +7,6 @@ import "../Css/Templates.css";
 import * as Diff2Html from "diff2html/lib/diff2html"
 import "diff2html/bundles/css/diff2html.min.css"
 import { WtsConfiguration } from "./WtsConfiguration.js";
-import "../css/Templates.css";
 
 require("@progress/kendo-ui/js/kendo.notification.js");
 require("@progress/kendo-ui/js/kendo.button.js");
