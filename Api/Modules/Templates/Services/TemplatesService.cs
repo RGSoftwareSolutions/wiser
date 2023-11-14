@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Diagnostics;
@@ -18,7 +18,6 @@ using Api.Core.Interfaces;
 using Api.Core.Models;
 using Api.Core.Services;
 using Api.Modules.Branches.Interfaces;
-using Api.Modules.Customers.Interfaces;
 using Api.Modules.Kendo.Enums;
 using Api.Modules.Templates.Attributes;
 using Api.Modules.Templates.Helpers;
@@ -31,6 +30,7 @@ using Api.Modules.Templates.Models.Measurements;
 using Api.Modules.Templates.Models.Other;
 using Api.Modules.Templates.Models.Template;
 using Api.Modules.Templates.Models.Template.WtsModels;
+using Api.Modules.Tenants.Interfaces;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Core.Enums;
 using GeeksCoreLibrary.Core.Extensions;
@@ -72,7 +72,7 @@ namespace Api.Modules.Templates.Services
         private static readonly Dictionary<string, string> TemplateQueryStrings = new();
 
         private readonly IHttpContextAccessor httpContextAccessor;
-        private readonly IWiserCustomersService wiserCustomersService;
+        private readonly IWiserTenantsService wiserTenantsService;
         private readonly IStringReplacementsService stringReplacementsService;
         private readonly GeeksCoreLibrary.Modules.Templates.Interfaces.ITemplatesService gclTemplatesService;
         private readonly IDatabaseConnection clientDatabaseConnection;
@@ -99,7 +99,7 @@ namespace Api.Modules.Templates.Services
         /// Creates a new instance of TemplatesService.
         /// </summary>
         public TemplatesService(IHttpContextAccessor httpContextAccessor,
-            IWiserCustomersService wiserCustomersService,
+            IWiserTenantsService wiserTenantsService,
             IStringReplacementsService stringReplacementsService,
             GeeksCoreLibrary.Modules.Templates.Interfaces.ITemplatesService gclTemplatesService,
             IDatabaseConnection clientDatabaseConnection,
@@ -122,7 +122,7 @@ namespace Api.Modules.Templates.Services
             IWtsConfigurationService wtsConfigurationService)
         {
             this.httpContextAccessor = httpContextAccessor;
-            this.wiserCustomersService = wiserCustomersService;
+            this.wiserTenantsService = wiserTenantsService;
             this.stringReplacementsService = stringReplacementsService;
             this.gclTemplatesService = gclTemplatesService;
             this.clientDatabaseConnection = clientDatabaseConnection;
@@ -185,10 +185,10 @@ namespace Api.Modules.Templates.Services
         /// <inheritdoc />
         public async Task<ServiceResult<JToken>> GetAndExecuteQueryAsync(ClaimsIdentity identity, string templateName, IFormCollection requestPostData = null)
         {
-            var customer = (await wiserCustomersService.GetSingleAsync(identity)).ModelObject;
+            var tenant = (await wiserTenantsService.GetSingleAsync(identity)).ModelObject;
 
             // Set the encryption key for the GCL internally. The GCL can't know which key to use otherwise.
-            GclSettings.Current.ExpiringEncryptionKey = customer.EncryptionKey;
+            GclSettings.Current.ExpiringEncryptionKey = tenant.EncryptionKey;
 
             var queryTemplate = GetQueryTemplate(0, templateName);
             queryTemplate.Content = apiReplacementsService.DoIdentityReplacements(queryTemplate.Content, identity, true);
@@ -199,7 +199,7 @@ namespace Api.Modules.Templates.Services
                 queryTemplate.Content = stringReplacementsService.DoReplacements(queryTemplate.Content, requestPostData, true);
             }
 
-            var result = await gclTemplatesService.GetJsonResponseFromQueryAsync(queryTemplate, customer.EncryptionKey);
+            var result = await gclTemplatesService.GetJsonResponseFromQueryAsync(queryTemplate, tenant.EncryptionKey);
             return new ServiceResult<JToken>(result);
         }
 
@@ -326,7 +326,6 @@ ORDER BY template.ordering ASC");
             {
                 if (new List<string>()
                     {
-                        "SEARCH_ITEMS_OLD",
                         "GET_ITEM_DETAILS",
                         "GET_DATA_FOR_TABLE",
                         "GET_DATA_FOR_FIELD_TABLE"
@@ -876,39 +875,6 @@ GROUP BY i.id
 ORDER BY 
     CASE WHEN @_ordering = 'title' THEN i.title END ASC,
 	CASE WHEN @_ordering <> 'title' THEN ilp.ordering END ASC");
-                TemplateQueryStrings.Add("SEARCH_ITEMS", @"SET @mid = {moduleid};
-SET @parent = '{id:decrypt(true)}';
-SET @_entityType = IF('{entityType}' LIKE '{%}', '', '{entityType}');
-SET @_searchValue = '{search}';
-SET @_searchInTitle = IF('{searchInTitle}' LIKE '{%}' OR '{searchInTitle}' = '1', TRUE, FALSE);
-SET @_searchFields = IF('{searchFields}' LIKE '{%}', '', '{searchFields}');
-SET @_searchEverywhere = IF('{searchEverywhere}' LIKE '{%}', FALSE, {searchEverywhere});
-
-SELECT 
-	i.id,
-	i.id AS encryptedId_encrypt_withdate,
-	i.title AS name
-FROM wiser_item i
-LEFT JOIN wiser_itemlink ilp ON ilp.destination_item_id = @parent AND ilp.item_id = i.id
-LEFT JOIN wiser_itemdetail id ON id.item_id = i.id
-LEFT JOIN wiser_itemlink ilc ON ilc.destination_item_id = i.id
-LEFT JOIN wiser_entity we ON we.name = i.entity_type
-
-# Check permissions. Default permissions are everything enabled, so if the user has no role or the role has no permissions on this item, they are allowed everything.
-LEFT JOIN wiser_user_roles user_role ON user_role.user_id = @userId
-LEFT JOIN wiser_permission permission ON permission.role_id = user_role.role_id AND permission.item_id = i.id
-
-WHERE (permission.id IS NULL OR (permission.permissions & 1) > 0)
-AND i.entity_type = @_entityType
-AND (@_searchEverywhere = TRUE OR ilp.id IS NOT NULL)
-AND (
-    (NOT @_searchInTitle AND @_searchFields = '')
-    OR (@_searchInTitle AND i.title LIKE CONCAT('%', @_searchValue, '%'))
-    OR (@_searchFields <> '' AND FIND_IN_SET(id.key, @_searchFields) AND id.value LIKE CONCAT('%', @_searchValue, '%'))
-)
-
-GROUP BY i.id
-ORDER BY ilp.ordering, i.title");
                 TemplateQueryStrings.Add("GET_COLUMNS_FOR_TABLE", @"SET @selected_id = {itemId:decrypt(true)}; # 3077
 
 SELECT 
@@ -1294,12 +1260,6 @@ GROUP BY il.item_id, id2.id
 
 ORDER BY ordering, title");
 
-                TemplateQueryStrings.Add("GET_DATA_FROM_ENTITY_QUERY", @"SET @_itemId = {myItemId};
-SET @entityproperty_id = {propertyid};
-SET @querytext = (SELECT REPLACE(REPLACE(IFNULL(data_query, 'SELECT 0 AS id, "" AS name'), '{itemId}', @_itemId), '{itemid}', @_itemId) FROM wiser_entityproperty WHERE id=@entityproperty_id);
-
-PREPARE stmt1 FROM @querytext;
-EXECUTE stmt1;");
                 TemplateQueryStrings.Add("GET_WISER_LINK_LIST", @"SELECT *,
 CONCAT(`name`, ' --> #', type, ' connected entity: ""', connected_entity_type ,'"" destination entity: ""', destination_entity_type, '""')AS formattedName
 FROM `wiser_link`
@@ -1466,8 +1426,8 @@ LIMIT 1";
             }
 
             templateData.PublishedEnvironments = templateEnvironmentsResult.ModelObject;
-            var encryptionKey = (await wiserCustomersService.GetEncryptionKey(identity, true)).ModelObject;
-            templateData.EditorValue = templateDataService.DecryptEditorValueIfEncrypted(encryptionKey, templateData);
+            var encryptionKey = (await wiserTenantsService.GetEncryptionKey(identity, true)).ModelObject;
+            templateDataService.DecryptEditorValueIfEncrypted(encryptionKey, templateData);
 
             return new ServiceResult<TemplateSettingsModel>(templateData);
         }
@@ -1690,7 +1650,7 @@ LIMIT 1";
                     // Make sure all true/false values are lowercase, because the XML parser is case-sensitive.
                     trimmedValue = Regex.Replace(trimmedValue, @"(?i)(true|false)", match => match.Value.ToLower());
 
-                    var encryptionKey = (await wiserCustomersService.GetEncryptionKey(identity, true)).ModelObject;
+                    var encryptionKey = (await wiserTenantsService.GetEncryptionKey(identity, true)).ModelObject;
                     template.EditorValue = trimmedValue.EncryptWithAes(encryptionKey, useSlowerButMoreSecureMethod: true);
 
                     break;
@@ -1808,7 +1768,7 @@ LIMIT 1";
         /// <inheritdoc />
         public async Task<ServiceResult<List<SearchResultModel>>> SearchAsync(ClaimsIdentity identity, string searchValue)
         {
-            var encryptionKey = (await wiserCustomersService.GetEncryptionKey(identity, true)).ModelObject;
+            var encryptionKey = (await wiserTenantsService.GetEncryptionKey(identity, true)).ModelObject;
             return new ServiceResult<List<SearchResultModel>>(await templateDataService.SearchAsync(searchValue, encryptionKey));
         }
 
@@ -2578,7 +2538,7 @@ WHERE template.templatetype IS NULL OR template.templatetype <> 'normal'";
             }
 
             // Check if the branch exists.
-            var branchToDeploy = (await wiserCustomersService.GetSingleAsync(branchId, true)).ModelObject;
+            var branchToDeploy = (await wiserTenantsService.GetSingleAsync(branchId, true)).ModelObject;
             if (branchToDeploy == null)
             {
                 return new ServiceResult<bool>
@@ -2902,7 +2862,7 @@ WHERE template.templatetype IS NULL OR template.templatetype <> 'normal'";
         /// </summary>
         private async Task SetupGclForPreviewAsync(ClaimsIdentity identity, GenerateTemplatePreviewRequestModel requestModel)
         {
-            var customer = (await wiserCustomersService.GetSingleAsync(identity)).ModelObject;
+            var tenant = (await wiserTenantsService.GetSingleAsync(identity)).ModelObject;
             if (requestModel.PreviewVariables != null && httpContextAccessor.HttpContext != null)
             {
                 foreach (var previewVariable in requestModel.PreviewVariables)
@@ -2912,7 +2872,7 @@ WHERE template.templatetype IS NULL OR template.templatetype <> 'normal'";
                         case "POST":
                             if (previewVariable.Encrypt)
                             {
-                                previewVariable.Value = previewVariable.Value.EncryptWithAesWithSalt(customer.EncryptionKey);
+                                previewVariable.Value = previewVariable.Value.EncryptWithAesWithSalt(tenant.EncryptionKey);
                             }
 
                             httpContextAccessor.HttpContext.Items.Add(previewVariable.Key, previewVariable.Value);
@@ -2920,7 +2880,7 @@ WHERE template.templatetype IS NULL OR template.templatetype <> 'normal'";
                         case "SESSION":
                             if (previewVariable.Encrypt)
                             {
-                                previewVariable.Value = previewVariable.Value.EncryptWithAesWithSalt(customer.EncryptionKey);
+                                previewVariable.Value = previewVariable.Value.EncryptWithAesWithSalt(tenant.EncryptionKey);
                             }
 
                             httpContextAccessor.HttpContext.Items.Add(previewVariable.Key, previewVariable.Value);

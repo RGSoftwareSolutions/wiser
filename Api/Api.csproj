@@ -155,17 +155,17 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="GeeksCoreLibrary" Version="4.0.4" />
+    <PackageReference Include="GeeksCoreLibrary" Version="4.0.8" />
     <PackageReference Include="Google.Cloud.Translation.V2" Version="3.2.0" />
-    <PackageReference Include="GoogleAuthenticator" Version="3.1.0" />
+    <PackageReference Include="GoogleAuthenticator" Version="3.1.1" />
     <PackageReference Include="IdentityServer4" Version="4.1.2" />
     <PackageReference Include="JavaScriptEngineSwitcher.ChakraCore" Version="3.21.0" />
     <PackageReference Include="JavaScriptEngineSwitcher.ChakraCore.Native.win-x64" Version="3.21.0" />
     <PackageReference Include="JavaScriptEngineSwitcher.Extensions.MsDependencyInjection" Version="3.21.0" />
     <PackageReference Include="LibSassHost" Version="1.3.3" />
     <PackageReference Include="LibSassHost.Native.win-x64" Version="1.3.3" />
-    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="7.0.10" />
-    <PackageReference Include="NUglify" Version="1.20.7" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="7.0.13" />
+    <PackageReference Include="NUglify" Version="1.21.0" />
     <PackageReference Include="PusherServer" Version="5.0.0" />
     <PackageReference Include="QRCoder" Version="1.4.3" />
     <PackageReference Include="React.AspNet" Version="5.2.12" />

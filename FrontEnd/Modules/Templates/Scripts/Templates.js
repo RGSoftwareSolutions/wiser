@@ -3,6 +3,9 @@ import {Wiser} from "../../Base/Scripts/Utils.js";
 import "../../Base/Scripts/Processing.js";
 import {Preview} from "./Preview.js";
 import {TemplateConnectedUsers} from "./TemplateConnectedUsers.js";
+import "../Css/Templates.css";
+import * as Diff2Html from "diff2html/lib/diff2html"
+import "diff2html/bundles/css/diff2html.min.css"
 import { WtsConfiguration } from "./WtsConfiguration.js";
 import "../css/Templates.css";
 
@@ -93,7 +96,7 @@ const moduleSettings = {
             // Default settings
             this.settings = {
                 moduleId: 0,
-                customerId: 0,
+                tenantId: 0,
                 username: "Onbekend",
                 userEmailAddress: "",
                 userType: "",
@@ -156,7 +159,7 @@ const moduleSettings = {
 
             const userData = await Wiser.getLoggedInUserData(this.settings.wiserApiRoot);
             this.settings.userId = userData.encryptedId;
-            this.settings.customerId = userData.encryptedCustomerId;
+            this.settings.tenantId = userData.encryptedTenantId;
             this.settings.zeroEncrypted = userData.zeroEncrypted;
             this.settings.filesRootId = userData.filesRootId;
             this.settings.imagesRootId = userData.imagesRootId;
@@ -2426,6 +2429,7 @@ const moduleSettings = {
                         this.loadNextHistoryPart();
                     }
                 });
+                this.createHistoryDiffFields(document.getElementById("historyContainer"));
             } catch (exception) {
                 kendo.alert("Er is iets fout gegaan met het laden van de historie. Probeer het a.u.b. opnieuw of neem contact op met ons.");
                 console.error(exception);
@@ -2466,6 +2470,7 @@ const moduleSettings = {
                 });
 
                 document.getElementById("historyContainer").insertAdjacentHTML("beforeend", historyTabPart);
+                this.createHistoryDiffFields(document.getElementById("historyContainer"));
                 this.lastLoadedHistoryPartNumber++;
             } catch (exception) {
                 kendo.alert("Er is iets fout gegaan met het laden van de historie. Probeer het a.u.b. opnieuw of neem contact op met ons.");
@@ -2474,6 +2479,42 @@ const moduleSettings = {
 
             window.processing.removeProcess(process);
             this.loadingNextPart = false;
+        }
+
+        /**
+         * Replaces all div.diffField elements with diff2html diff interfaces.
+         * @param {Element} container The container that will be searched for div.diffField elements.
+         */
+        createHistoryDiffFields(container) {
+            const Diff = require("diff");
+            const pretty = require("pretty");
+            
+            let fields = container.querySelectorAll("div.diffField");
+            for (let i = 0; i < fields.length; i++) {
+                let field = fields[i];
+                let oldValue = field.querySelector("span.oldValue")?.getAttribute("value");
+                let newValue = field.querySelector("span.newValue")?.getAttribute("value");
+                const fieldName = field.getAttribute("field-name");
+                const dataType = field.getAttribute("data-type");
+                switch (dataType) { // TemplateTypes enum
+                    case "Html": // Html is saved without whitespace in the database, so we need to make it readable first
+                        oldValue = !oldValue ? "" : pretty(oldValue, { ocd: false });
+                        newValue = !newValue ? "" : pretty(newValue, { ocd: false });
+                        break;
+                    default:
+                        oldValue = !oldValue ? "" : oldValue;
+                        newValue = !newValue ? "" : newValue;
+                }
+                
+                const diff = Diff.createTwoFilesPatch(fieldName, fieldName, oldValue, newValue);                
+                field.innerHTML = Diff2Html.html(diff, {
+                    drawFileList: false,
+                    matching: "words",
+                    outputFormat: "side-by-side"
+                });
+                
+                field.classList.remove("diffField");
+            }
         }
 
         /**
@@ -2693,7 +2734,7 @@ const moduleSettings = {
                 await this.updateRenderingDataOnMeasurementsTab(templateId);
                 this.renderingLogsChart.resize();
             } catch (exception) {
-                kendo.alert("Er is iets fout gegaan met het laden van de historie. Probeer het a.u.b. opnieuw of neem contact op met ons.");
+                kendo.alert("Er is iets fout gegaan met het laden van de metingen. Probeer het a.u.b. opnieuw of neem contact op met ons.");
                 console.error(exception);
             }
 

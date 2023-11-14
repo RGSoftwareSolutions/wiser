@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Data;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -11,9 +12,9 @@ using Api.Core.Helpers;
 using Api.Core.Services;
 using Api.Modules.Branches.Interfaces;
 using Api.Modules.Branches.Models;
-using Api.Modules.Customers.Enums;
-using Api.Modules.Customers.Interfaces;
-using Api.Modules.Customers.Models;
+using Api.Modules.Tenants.Enums;
+using Api.Modules.Tenants.Interfaces;
+using Api.Modules.Tenants.Models;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Core.Extensions;
 using GeeksCoreLibrary.Core.Helpers;
@@ -32,7 +33,7 @@ namespace Api.Modules.Branches.Services
     /// <inheritdoc cref="IBranchesService" />
     public class BranchesService : IBranchesService, IScopedService
     {
-        private readonly IWiserCustomersService wiserCustomersService;
+        private readonly IWiserTenantsService wiserTenantsService;
         private readonly IDatabaseConnection clientDatabaseConnection;
         private readonly IDatabaseHelpersService databaseHelpersService;
         private readonly ILogger<BranchesService> logger;
@@ -42,9 +43,9 @@ namespace Api.Modules.Branches.Services
         /// <summary>
         /// Creates a new instance of <see cref="BranchesService"/>.
         /// </summary>
-        public BranchesService(IWiserCustomersService wiserCustomersService, IDatabaseConnection connection, IDatabaseHelpersService databaseHelpersService, ILogger<BranchesService> logger, IWiserItemsService wiserItemsService)
+        public BranchesService(IWiserTenantsService wiserTenantsService, IDatabaseConnection connection, IDatabaseHelpersService databaseHelpersService, ILogger<BranchesService> logger, IWiserItemsService wiserItemsService)
         {
-            this.wiserCustomersService = wiserCustomersService;
+            this.wiserTenantsService = wiserTenantsService;
             this.clientDatabaseConnection = connection;
             this.databaseHelpersService = databaseHelpersService;
             this.logger = logger;
@@ -57,11 +58,11 @@ namespace Api.Modules.Branches.Services
         }
 
         /// <inheritdoc />
-        public async Task<ServiceResult<CustomerModel>> CreateAsync(ClaimsIdentity identity, CreateBranchSettingsModel settings)
+        public async Task<ServiceResult<TenantModel>> CreateAsync(ClaimsIdentity identity, CreateBranchSettingsModel settings)
         {
             if (String.IsNullOrWhiteSpace(settings?.Name))
             {
-                return new ServiceResult<CustomerModel>
+                return new ServiceResult<TenantModel>
                 {
                     ErrorMessage = "Name is empty",
                     StatusCode = HttpStatusCode.BadRequest
@@ -71,34 +72,34 @@ namespace Api.Modules.Branches.Services
             // Make sure the queue table exists and is up-to-date.
             await databaseHelpersService.CheckAndUpdateTablesAsync(new List<string> {WiserTableNames.WiserBranchesQueue});
 
-            var currentCustomer = (await wiserCustomersService.GetSingleAsync(identity, true)).ModelObject;
-            var subDomain = currentCustomer.SubDomain;
-            var newCustomerName = $"{currentCustomer.Name} - {settings.Name}";
-            var newCustomerTitle = $"{currentCustomer.WiserTitle} - {settings.Name}";
+            var currentTenant = (await wiserTenantsService.GetSingleAsync(identity, true)).ModelObject;
+            var subDomain = currentTenant.SubDomain;
+            var newTenantName = $"{currentTenant.Name} - {settings.Name}";
+            var newTenantTitle = $"{currentTenant.WiserTitle} - {settings.Name}";
 
-            // If the ID is not the same as the customer ID, it means this is not the main/production environment of this customer.
-            // Then we want to get the sub domain of the main/production environment of the customer, to use as base for the new sub domain for the new environment.
-            if (currentCustomer.Id != currentCustomer.CustomerId)
+            // If the ID is not the same as the Tenant ID, it means this is not the main/production environment of this Tenant.
+            // Then we want to get the sub domain of the main/production environment of the Tenant, to use as base for the new sub domain for the new environment.
+            if (currentTenant.Id != currentTenant.TenantId)
             {
-                wiserDatabaseConnection.AddParameter("customerId", currentCustomer.CustomerId);
-                var dataTable = await wiserDatabaseConnection.GetAsync($"SELECT subdomain, name, wiser_title FROM {ApiTableNames.WiserCustomers} WHERE id = ?customerId");
+                wiserDatabaseConnection.AddParameter("tenantId", currentTenant.TenantId);
+                var dataTable = await wiserDatabaseConnection.GetAsync($"SELECT subdomain, name, wiser_title FROM {ApiTableNames.WiserTenants} WHERE id = ?tenantId");
                 if (dataTable.Rows.Count == 0)
                 {
                     // This should never happen, hence the exception.
-                    throw new Exception("Customer not found");
+                    throw new Exception("Tenant not found");
                 }
 
                 subDomain = dataTable.Rows[0].Field<string>("subdomain");
-                newCustomerName = $"{dataTable.Rows[0].Field<string>("name")} - {settings.Name}";
-                newCustomerTitle = $"{dataTable.Rows[0].Field<string>("wiser_title")} - {settings.Name}";
+                newTenantName = $"{dataTable.Rows[0].Field<string>("name")} - {settings.Name}";
+                newTenantTitle = $"{dataTable.Rows[0].Field<string>("wiser_title")} - {settings.Name}";
             }
 
             // Create a valid database and sub domain name for the new environment.
             var databaseNameBuilder = new StringBuilder(settings.Name.Trim().ToLowerInvariant());
             databaseNameBuilder = Path.GetInvalidFileNameChars().Aggregate(databaseNameBuilder, (current, invalidChar) => current.Replace(invalidChar.ToString(), ""));
-            databaseNameBuilder = databaseNameBuilder.Replace(@"\", "_").Replace(@"/", "_").Replace(".", "_").Replace(" ", "_").Replace(@"'","_");
+            databaseNameBuilder = databaseNameBuilder.Replace(@"\", "_").Replace(@"/", "_").Replace(".", "_").Replace(" ", "_").Replace(@"'", "_");
 
-            var databaseName = $"{currentCustomer.Database.DatabaseName}_{databaseNameBuilder}".ToMySqlSafeValue(false);
+            var databaseName = $"{currentTenant.Database.DatabaseName}_{databaseNameBuilder}".ToMySqlSafeValue(false);
             if (databaseName.Length > 54)
             {
                 databaseName = $"{databaseName[..54]}{DateTime.Now:yyMMddHHmm}";
@@ -106,20 +107,20 @@ namespace Api.Modules.Branches.Services
 
             subDomain += $"_{databaseNameBuilder}";
 
-            // Make sure no customer exists yet with this name and/or sub domain.
-            var customerExists = await wiserCustomersService.CustomerExistsAsync(newCustomerName, subDomain);
-            if (customerExists.StatusCode != HttpStatusCode.OK)
+            // Make sure no tenant exists yet with this name and/or sub domain.
+            var tenantExists = await wiserTenantsService.TenantExistsAsync(newTenantName, subDomain);
+            if (tenantExists.StatusCode != HttpStatusCode.OK)
             {
-                return new ServiceResult<CustomerModel>
+                return new ServiceResult<TenantModel>
                 {
-                    ErrorMessage = customerExists.ErrorMessage,
-                    StatusCode = customerExists.StatusCode
+                    ErrorMessage = tenantExists.ErrorMessage,
+                    StatusCode = tenantExists.StatusCode
                 };
             }
 
-            if (customerExists.ModelObject != CustomerExistsResults.Available)
+            if (tenantExists.ModelObject != TenantExistsResults.Available)
             {
-                return new ServiceResult<CustomerModel>
+                return new ServiceResult<TenantModel>
                 {
                     StatusCode = HttpStatusCode.Conflict,
                     ErrorMessage = $"Een branch met de naam '{settings.Name}' bestaat al."
@@ -129,49 +130,49 @@ namespace Api.Modules.Branches.Services
             // Make sure the database doesn't exist yet.
             if (await databaseHelpersService.DatabaseExistsAsync(databaseName))
             {
-                return new ServiceResult<CustomerModel>
+                return new ServiceResult<TenantModel>
                 {
                     StatusCode = HttpStatusCode.Conflict,
                     ErrorMessage = $"We hebben geprobeerd een database aan te maken met de naam '{databaseName}', echter bestaat deze al. Kies a.u.b. een andere naam, of neem contact op met ons."
                 };
             }
 
-            settings.NewCustomerName = newCustomerName;
+            settings.NewCustomerName = newTenantName;
             settings.SubDomain = subDomain;
-            settings.WiserTitle = newCustomerTitle;
+            settings.WiserTitle = newTenantTitle;
             settings.DatabaseName = databaseName;
 
-            // Add the new customer environment to easy_customers. We do this here already so that the WTS doesn't need access to the main wiser database.
-            var newCustomer = new CustomerModel
+            // Add the new tenant environment to easy_customers. We do this here already so that the WTS doesn't need access to the main wiser database.
+            var newTenant = new TenantModel
             {
-                CustomerId = currentCustomer.CustomerId,
-                Name = newCustomerName,
+                TenantId = currentTenant.TenantId,
+                Name = newTenantName,
                 EncryptionKey = SecurityHelpers.GenerateRandomPassword(20),
                 SubDomain = subDomain,
-                WiserTitle = newCustomerTitle,
+                WiserTitle = newTenantTitle,
                 Database = new ConnectionInformationModel
                 {
-                    Host = currentCustomer.Database.Host,
-                    Password = currentCustomer.Database.Password,
-                    Username = currentCustomer.Database.Username,
-                    PortNumber = currentCustomer.Database.PortNumber,
+                    Host = currentTenant.Database.Host,
+                    Password = currentTenant.Database.Password,
+                    Username = currentTenant.Database.Username,
+                    PortNumber = currentTenant.Database.PortNumber,
                     DatabaseName = databaseName
                 }
             };
 
-            await wiserCustomersService.CreateOrUpdateCustomerAsync(newCustomer);
+            await wiserTenantsService.CreateOrUpdateTenantAsync(newTenant);
 
             // Clear some data that we don't want to return to client.
-            newCustomer.Database.Host = null;
-            newCustomer.Database.Password = null;
-            newCustomer.Database.Username = null;
-            newCustomer.Database.PortNumber = 0;
+            newTenant.Database.Host = null;
+            newTenant.Database.Password = null;
+            newTenant.Database.Username = null;
+            newTenant.Database.PortNumber = 0;
 
             // Add the creation of the branch to the queue, so that the WTS can process it.
             clientDatabaseConnection.ClearParameters();
             clientDatabaseConnection.AddParameter("name", settings.Name);
             clientDatabaseConnection.AddParameter("action", "create");
-            clientDatabaseConnection.AddParameter("branch_id", newCustomer.Id);
+            clientDatabaseConnection.AddParameter("branch_id", newTenant.Id);
             clientDatabaseConnection.AddParameter("data", JsonConvert.SerializeObject(settings));
             clientDatabaseConnection.AddParameter("added_on", DateTime.Now);
             clientDatabaseConnection.AddParameter("start_on", settings.StartOn ?? DateTime.Now);
@@ -179,32 +180,32 @@ namespace Api.Modules.Branches.Services
             clientDatabaseConnection.AddParameter("user_id", IdentityHelpers.GetWiserUserId(identity));
             await clientDatabaseConnection.InsertOrUpdateRecordBasedOnParametersAsync(WiserTableNames.WiserBranchesQueue, 0);
 
-            return new ServiceResult<CustomerModel>(newCustomer);
+            return new ServiceResult<TenantModel>(newTenant);
         }
 
         /// <inheritdoc />
-        public async Task<ServiceResult<List<CustomerModel>>> GetAsync(ClaimsIdentity identity)
+        public async Task<ServiceResult<List<TenantModel>>> GetAsync(ClaimsIdentity identity)
         {
             // Make sure the queue table exists and is up-to-date.
             await databaseHelpersService.CheckAndUpdateTablesAsync(new List<string> {WiserTableNames.WiserBranchesQueue});
 
-            var currentCustomer = (await wiserCustomersService.GetSingleAsync(identity, true)).ModelObject;
+            var currentTenant = (await wiserTenantsService.GetSingleAsync(identity, true)).ModelObject;
 
             var query = $@"SELECT id, name, subdomain, db_dbname
-FROM {ApiTableNames.WiserCustomers}
-WHERE customerid = ?id
+FROM {ApiTableNames.WiserTenants}
+WHERE customerId = ?id
 AND id <> ?id
 ORDER BY id DESC";
 
-            wiserDatabaseConnection.AddParameter("id", currentCustomer.CustomerId);
+            wiserDatabaseConnection.AddParameter("id", currentTenant.TenantId);
             var dataTable = await wiserDatabaseConnection.GetAsync(query);
-            var results = new List<CustomerModel>();
+            var results = new List<TenantModel>();
             foreach (DataRow dataRow in dataTable.Rows)
             {
-                results.Add(new CustomerModel
+                results.Add(new TenantModel
                 {
                     Id = dataRow.Field<int>("id"),
-                    CustomerId = currentCustomer.CustomerId,
+                    TenantId = currentTenant.TenantId,
                     Name = dataRow.Field<string>("name"),
                     SubDomain = dataRow.Field<string>("subdomain"),
                     Database = new ConnectionInformationModel
@@ -226,8 +227,8 @@ WHERE action = 'create'";
             foreach (DataRow dataRow in dataTable.Rows)
             {
                 var id = dataRow.Field<int>("branch_id");
-                var customerModel = results.FirstOrDefault(customer => customer.Id == id);
-                if (customerModel == null)
+                var tenantModel = results.FirstOrDefault(tenant => tenant.Id == id);
+                if (tenantModel == null)
                 {
                     continue;
                 }
@@ -255,39 +256,40 @@ WHERE action = 'create'";
                     continue;
                 }
 
-                customerModel.Name += $" (Status: {statusMessage})";
+                tenantModel.Name += $" (Status: {statusMessage})";
             }
 
-            return new ServiceResult<List<CustomerModel>>(results);
+            return new ServiceResult<List<TenantModel>>(results);
         }
 
         /// <inheritdoc />
         public async Task<ServiceResult<bool>> IsMainBranchAsync(ClaimsIdentity identity)
         {
-            var currentBranch = (await wiserCustomersService.GetSingleAsync(identity, true)).ModelObject;
+            var currentBranch = (await wiserTenantsService.GetSingleAsync(identity, true)).ModelObject;
 
             return IsMainBranch(currentBranch);
         }
 
         /// <inheritdoc />
-        public ServiceResult<bool> IsMainBranch(CustomerModel branch)
+        public ServiceResult<bool> IsMainBranch(TenantModel branch)
         {
-            return new ServiceResult<bool>(branch.Id == branch.CustomerId);
+            return new ServiceResult<bool>(branch.Id == branch.TenantId);
         }
 
         /// <inheritdoc />
         public async Task<ServiceResult<ChangesAvailableForMergingModel>> GetChangesAsync(ClaimsIdentity identity, int id)
         {
-            var currentCustomer = (await wiserCustomersService.GetSingleAsync(identity, true)).ModelObject;
+            var currentTenant = (await wiserTenantsService.GetSingleAsync(identity, true)).ModelObject;
 
             var result = new ChangesAvailableForMergingModel();
+
             // If the id is 0, then get the current branch where the user is authenticated, otherwise get the branch of the given ID.
-            var selectedEnvironmentCustomer = id <= 0
-                ? currentCustomer
-                : (await wiserCustomersService.GetSingleAsync(id, true)).ModelObject;
+            var selectedEnvironmentTenant = id <= 0
+                ? currentTenant
+                : (await wiserTenantsService.GetSingleAsync(id, true)).ModelObject;
 
             // Only allow users to get the changes of their own branches.
-            if (currentCustomer.CustomerId != selectedEnvironmentCustomer.CustomerId)
+            if (currentTenant.TenantId != selectedEnvironmentTenant.TenantId)
             {
                 return new ServiceResult<ChangesAvailableForMergingModel>
                 {
@@ -295,12 +297,59 @@ WHERE action = 'create'";
                 };
             }
 
+            await using var branchConnection = new MySqlConnection(wiserTenantsService.GenerateConnectionStringFromTenant(selectedEnvironmentTenant));
+            await branchConnection.OpenAsync();
+
             // Get some data that we'll need later.
             var allLinkTypeSettings = await wiserItemsService.GetAllLinkTypeSettingsAsync();
             var tablePrefixes = new Dictionary<string, string>();
 
-            await using var branchConnection = new MySqlConnection(wiserCustomersService.GenerateConnectionStringFromCustomer(selectedEnvironmentCustomer));
-            await branchConnection.OpenAsync();
+            var tablePrefixDataTable = new DataTable();
+            await using (var branchCommand = branchConnection.CreateCommand())
+            {
+                branchCommand.CommandText = $"SELECT name, dedicated_table_prefix FROM {WiserTableNames.WiserEntity}";
+                using var branchAdapter = new MySqlDataAdapter(branchCommand);
+                await branchAdapter.FillAsync(tablePrefixDataTable);
+            }
+
+            foreach (DataRow dataRow in tablePrefixDataTable.Rows)
+            {
+                var prefix = dataRow.Field<string>("dedicated_table_prefix");
+                if (!String.IsNullOrWhiteSpace(prefix) && !prefix.EndsWith("_"))
+                {
+                    prefix += "_";
+                }
+
+                tablePrefixes.TryAdd(dataRow.Field<string>("name"), prefix);
+            }
+
+            var filesData = new Dictionary<string, Dictionary<ulong, (ulong itemId, ulong itemLinkId)>>();
+            foreach (var (_, tablePrefix) in tablePrefixes)
+            {
+                var tableName = $"{tablePrefix}{WiserTableNames.WiserItemFile}";
+                if (filesData.ContainsKey(tableName))
+                {
+                    continue;
+                }
+
+                var entityDictionary = new Dictionary<ulong, (ulong itemId, ulong itemLinkId)>();
+                filesData.Add(tableName, entityDictionary);
+
+                var filesTable = new DataTable();
+                await using (var branchCommand = branchConnection.CreateCommand())
+                {
+                    branchCommand.CommandText = @$"SELECT id, item_id, itemlink_id FROM {tableName}
+UNION ALL
+SELECT id, item_id, itemlink_id FROM {tableName}{WiserTableNames.ArchiveSuffix}";
+                    using var branchAdapter = new MySqlDataAdapter(branchCommand);
+                    await branchAdapter.FillAsync(tablePrefixDataTable);
+                }
+
+                foreach (DataRow dataRow in filesTable.Rows)
+                {
+                    entityDictionary.Add(dataRow.Field<ulong>("id"), (dataRow.Field<ulong>("item_id"), dataRow.Field<ulong>("itemlink_id")));
+                }
+            }
 
             // Get all history since last synchronisation.
             var dataTable = new DataTable();
@@ -416,6 +465,7 @@ WHERE action = 'create'";
 
             // Local function to get the entity type of an item.
             var idToEntityTypeMappings = new Dictionary<ulong, string>();
+
             async Task<string> GetEntityTypeFromIdAsync(ulong itemId, string tablePrefix, MySqlConnection branchconnection)
             {
                 if (idToEntityTypeMappings.TryGetValue(itemId, out var async))
@@ -441,6 +491,59 @@ LIMIT 1";
                 return entityType;
             }
 
+            // Get the entity types and table prefixes for both items in a link.
+            async Task<(string SourceType, string SourceTablePrefix, string DestinationType, string DestinationTablePrefix)?> GetEntityTypesOfLinkAsync(ulong sourceId, ulong destinationId, int linkType, MySqlConnection mySqlConnection, List<LinkSettingsModel> allLinkTypeSettings, Dictionary<string, string> tablePrefixes)
+            {
+                var currentLinkTypeSettings = allLinkTypeSettings.Where(l => l.Type == linkType).ToList();
+
+                // If there are no settings for this link, we assume that the links are from items in the normal wiser_item table and not a table with a prefix.
+                if (!currentLinkTypeSettings.Any())
+                {
+                    // Check if the source item exists in this table.
+                    var sourceEntityType = await GetEntityTypeFromIdAsync(sourceId, "", mySqlConnection);
+
+                    // Check if the destination item exists in this table.
+                    var destinationEntityType = await GetEntityTypeFromIdAsync(destinationId, "", mySqlConnection);
+
+                    return (sourceEntityType, "", destinationEntityType, "");
+                }
+
+                // It's possible that there are multiple link types that use the same number, so we have to check all of them.
+                foreach (var linkTypeSettings in currentLinkTypeSettings)
+                {
+                    if (!tablePrefixes.TryGetValue(linkTypeSettings.SourceEntityType, out var sourceTablePrefix))
+                    {
+                        sourceTablePrefix = await wiserItemsService.GetTablePrefixForEntityAsync(linkTypeSettings.SourceEntityType);
+                        tablePrefixes.Add(linkTypeSettings.SourceEntityType, sourceTablePrefix);
+                    }
+
+                    if (!tablePrefixes.TryGetValue(linkTypeSettings.DestinationEntityType, out var destinationTablePrefix))
+                    {
+                        destinationTablePrefix = await wiserItemsService.GetTablePrefixForEntityAsync(linkTypeSettings.DestinationEntityType);
+                        tablePrefixes.Add(linkTypeSettings.DestinationEntityType, destinationTablePrefix);
+                    }
+
+                    // Check if the source item exists in this table.
+                    var sourceEntityType = await GetEntityTypeFromIdAsync(sourceId, sourceTablePrefix, mySqlConnection);
+                    if (!String.Equals(sourceEntityType, linkTypeSettings.SourceEntityType, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    // Check if the destination item exists in this table.
+                    var destinationEntityType = await GetEntityTypeFromIdAsync(destinationId, destinationTablePrefix, mySqlConnection);
+                    if (!String.Equals(destinationEntityType, linkTypeSettings.DestinationEntityType, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    // If we reached this point, it means we found the correct link type and entity types.
+                    return (linkTypeSettings.SourceEntityType, sourceTablePrefix, linkTypeSettings.DestinationEntityType, destinationTablePrefix);
+                }
+
+                return null;
+            }
+
             // Local function to get the type number, source item ID and the destination item ID from a link.
             async Task<(int Type, ulong SourceItemId, ulong DestinationItemId)?> GetDataFromLinkAsync(ulong linkId, string tablePrefix, MySqlConnection connection)
             {
@@ -463,8 +566,11 @@ LIMIT 1";
             }
 
             // Count all changed items and settings (if a single item has been changed multiple times, we count only one change).
+            var times = new Dictionary<string, (int count, TimeSpan totalTime)>();
+            var stopwatch = new Stopwatch();
             foreach (DataRow dataRow in dataTable.Rows)
             {
+                stopwatch.Start();
                 var action = dataRow.Field<string>("action")?.ToUpperInvariant();
                 var tableName = dataRow.Field<string>("tablename") ?? "";
                 var itemId = dataRow.Field<ulong>("item_id");
@@ -512,7 +618,7 @@ LIMIT 1";
                     }
                     case "UPDATE_QUERY":
                     {
-                    AddSettingToMutationList(updatedSettings, WiserSettingTypes.Query, itemId);
+                        AddSettingToMutationList(updatedSettings, WiserSettingTypes.Query, itemId);
                         break;
                     }
                     case "DELETE_QUERY":
@@ -663,6 +769,7 @@ LIMIT 1";
                             sourceTablePrefix = await wiserItemsService.GetTablePrefixForEntityAsync(linkData.Value.SourceType);
                             tablePrefixes.Add(linkData.Value.SourceType, sourceTablePrefix);
                         }
+
                         if (!tablePrefixes.TryGetValue(linkData.Value.DestinationType, out var destinationTablePrefix))
                         {
                             destinationTablePrefix = await wiserItemsService.GetTablePrefixForEntityAsync(linkData.Value.DestinationType);
@@ -696,6 +803,7 @@ LIMIT 1";
                             sourceTablePrefix = await wiserItemsService.GetTablePrefixForEntityAsync(entityData.Value.SourceType);
                             tablePrefixes.Add(entityData.Value.SourceType, sourceTablePrefix);
                         }
+
                         if (!tablePrefixes.TryGetValue(entityData.Value.DestinationType, out var destinationTablePrefix))
                         {
                             destinationTablePrefix = await wiserItemsService.GetTablePrefixForEntityAsync(entityData.Value.DestinationType);
@@ -722,6 +830,7 @@ LIMIT 1";
                             sourceTablePrefix = await wiserItemsService.GetTablePrefixForEntityAsync(linkData.Value.SourceType);
                             tablePrefixes.Add(linkData.Value.SourceType, sourceTablePrefix);
                         }
+
                         if (!tablePrefixes.TryGetValue(linkData.Value.DestinationType, out var destinationTablePrefix))
                         {
                             destinationTablePrefix = await wiserItemsService.GetTablePrefixForEntityAsync(linkData.Value.DestinationType);
@@ -765,6 +874,7 @@ LIMIT 1";
                             sourceTablePrefix = await wiserItemsService.GetTablePrefixForEntityAsync(entityData.Value.SourceType);
                             tablePrefixes.Add(entityData.Value.SourceType, sourceTablePrefix);
                         }
+
                         if (!tablePrefixes.TryGetValue(entityData.Value.DestinationType, out var destinationTablePrefix))
                         {
                             destinationTablePrefix = await wiserItemsService.GetTablePrefixForEntityAsync(entityData.Value.DestinationType);
@@ -779,22 +889,34 @@ LIMIT 1";
                     }
                     case "UPDATE_FILE":
                     {
-                        var fileDataTable = new DataTable();
-                        await using var linkCommand = branchConnection.CreateCommand();
-                        linkCommand.Parameters.AddWithValue("id", itemId);
-                        linkCommand.CommandText = $@"SELECT item_id, itemlink_id FROM `{tableName}` WHERE id = ?id
+                        ulong itemIdFromFile = 0;
+                        ulong linkIdFromFile = 0;
+                        if (!filesData.TryGetValue(tableName, out var fileDictionary) || !fileDictionary.TryGetValue(itemId, out var fileData))
+                        {
+                            var fileDataTable = new DataTable();
+                            await using var linkCommand = branchConnection.CreateCommand();
+                            linkCommand.Parameters.AddWithValue("id", itemId);
+                            linkCommand.CommandText = $@"SELECT item_id, itemlink_id FROM `{tableName}` WHERE id = ?id
 UNION ALL
 SELECT item_id, itemlink_id FROM `{tableName}{WiserTableNames.ArchiveSuffix}` WHERE id = ?id
 LIMIT 1";
-                        using var linkAdapter = new MySqlDataAdapter(linkCommand);
-                        await linkAdapter.FillAsync(fileDataTable);
+                            using var linkAdapter = new MySqlDataAdapter(linkCommand);
+                            await linkAdapter.FillAsync(fileDataTable);
 
-                        if (fileDataTable.Rows.Count == 0)
+                            if (fileDataTable.Rows.Count == 0)
+                            {
+                                break;
+                            }
+
+                            itemIdFromFile = Convert.ToUInt64(fileDataTable.Rows[0]["item_id"]);
+                            linkIdFromFile = Convert.ToUInt64(fileDataTable.Rows[0]["itemlink_id"]);
+                        }
+                        else
                         {
-                            break;
+                            itemIdFromFile = fileData.itemId;
+                            linkIdFromFile = fileData.itemLinkId;
                         }
 
-                        var itemIdFromFile = Convert.ToUInt64(fileDataTable.Rows[0]["item_id"]);
                         if (itemIdFromFile > 0)
                         {
                             var tablePrefix = BranchesHelpers.GetTablePrefix(tableName, itemIdFromFile);
@@ -803,7 +925,6 @@ LIMIT 1";
                         }
 
                         // First get the source item ID and destination item ID of the link.
-                        var linkIdFromFile = Convert.ToUInt64(fileDataTable.Rows[0]["itemlink_id"]);
                         var linkData = await GetDataFromLinkAsync(linkIdFromFile, BranchesHelpers.GetTablePrefix(tableName, 0).TablePrefix, branchConnection);
                         if (!linkData.HasValue)
                         {
@@ -822,6 +943,7 @@ LIMIT 1";
                             sourceTablePrefix = await wiserItemsService.GetTablePrefixForEntityAsync(entityData.Value.SourceType);
                             tablePrefixes.Add(entityData.Value.SourceType, sourceTablePrefix);
                         }
+
                         if (!tablePrefixes.TryGetValue(entityData.Value.DestinationType, out var destinationTablePrefix))
                         {
                             destinationTablePrefix = await wiserItemsService.GetTablePrefixForEntityAsync(entityData.Value.DestinationType);
@@ -835,9 +957,22 @@ LIMIT 1";
                         break;
                     }
                 }
+
+                if (times.ContainsKey(action))
+                {
+                    var (count, totalTime) = times[action];
+                    times[action] = (count + 1, totalTime + stopwatch.Elapsed);
+                }
+                else
+                {
+                    times.Add(action, (1, stopwatch.Elapsed));
+                }
+
+                stopwatch.Reset();
             }
 
             // Add the counters to the results.
+            stopwatch.Start();
             foreach (var item in createdItems)
             {
                 var entityType = item.EntityType;
@@ -849,6 +984,9 @@ LIMIT 1";
                 (await GetOrAddEntityTypeCounterAsync(entityType)).Created++;
             }
 
+            times.Add("createdItemsCounters", (1, stopwatch.Elapsed));
+
+            stopwatch.Restart();
             foreach (var item in updatedItems)
             {
                 var entityType = item.EntityType;
@@ -860,6 +998,9 @@ LIMIT 1";
                 (await GetOrAddEntityTypeCounterAsync(entityType)).Updated++;
             }
 
+            times.Add("updatedItemsCounters", (1, stopwatch.Elapsed));
+
+            stopwatch.Restart();
             foreach (var item in deletedItems)
             {
                 var entityType = item.EntityType;
@@ -871,20 +1012,34 @@ LIMIT 1";
                 (await GetOrAddEntityTypeCounterAsync(entityType)).Deleted++;
             }
 
+            times.Add("deletedItemsCounters", (1, stopwatch.Elapsed));
+
+            stopwatch.Restart();
             foreach (var setting in createdSettings)
             {
                 GetOrAddWiserSettingCounter(setting.Key).Created = setting.Value.Count;
             }
 
+            times.Add("createdSettingsCounters", (1, stopwatch.Elapsed));
+
+            stopwatch.Restart();
             foreach (var setting in updatedSettings)
             {
                 GetOrAddWiserSettingCounter(setting.Key).Updated = setting.Value.Count;
             }
 
+            times.Add("updatedSettingsCounters", (1, stopwatch.Elapsed));
+
+            stopwatch.Restart();
             foreach (var setting in deletedSettings)
             {
                 GetOrAddWiserSettingCounter(setting.Key).Deleted = setting.Value.Count;
             }
+
+            times.Add("deletedSettingsCounters", (1, stopwatch.Elapsed));
+            stopwatch.Stop();
+
+            logger.LogDebug($"Finished GetChangesAsync in {stopwatch.ElapsedMilliseconds}ms. Times: {JsonConvert.SerializeObject(times)}");
 
             return new ServiceResult<ChangesAvailableForMergingModel>(result);
         }
@@ -893,18 +1048,18 @@ LIMIT 1";
         public async Task<ServiceResult<MergeBranchResultModel>> MergeAsync(ClaimsIdentity identity, MergeBranchSettingsModel settings)
         {
             var result = new MergeBranchResultModel();
-            var currentCustomer = (await wiserCustomersService.GetSingleAsync(identity, true)).ModelObject;
-            var productionCustomer = (await wiserCustomersService.GetSingleAsync(currentCustomer.CustomerId, true)).ModelObject;
+            var currentTenant = (await wiserTenantsService.GetSingleAsync(identity, true)).ModelObject;
+            var productionTenant = (await wiserTenantsService.GetSingleAsync(currentTenant.TenantId, true)).ModelObject;
 
             // If the settings.Id is 0, it means the user wants to merge the current branch.
             if (settings.Id <= 0)
             {
-                settings.Id = currentCustomer.Id;
-                settings.DatabaseName = currentCustomer.Database.DatabaseName;
+                settings.Id = currentTenant.Id;
+                settings.DatabaseName = currentTenant.Database.DatabaseName;
             }
 
             // Make sure the user is not trying to copy changes from main to main, that would be weird and also cause a lot of problems.
-            if (currentCustomer.CustomerId == settings.Id)
+            if (currentTenant.TenantId == settings.Id)
             {
                 return new ServiceResult<MergeBranchResultModel>
                 {
@@ -913,12 +1068,12 @@ LIMIT 1";
                 };
             }
 
-            var selectedBranchCustomer = settings.Id == currentCustomer.Id
-                ? currentCustomer
-                : (await wiserCustomersService.GetSingleAsync(settings.Id, true)).ModelObject;
+            var selectedBranchTenant = settings.Id == currentTenant.Id
+                ? currentTenant
+                : (await wiserTenantsService.GetSingleAsync(settings.Id, true)).ModelObject;
 
             // Check to make sure someone is not trying to copy changes from an environment that does not belong to them.
-            if (selectedBranchCustomer == null || currentCustomer.CustomerId != selectedBranchCustomer.CustomerId)
+            if (selectedBranchTenant == null || currentTenant.TenantId != selectedBranchTenant.TenantId)
             {
                 return new ServiceResult<MergeBranchResultModel>
                 {
@@ -926,16 +1081,16 @@ LIMIT 1";
                 };
             }
 
-            settings.DatabaseName = selectedBranchCustomer.Database.DatabaseName;
+            settings.DatabaseName = selectedBranchTenant.Database.DatabaseName;
 
             DateTime? lastMergeDate = null;
 
             // Get the date and time of the last merge of this branch, so we can find all changes made in production after this date, to check for merge conflicts.
-            await using var mainConnection = new MySqlConnection(wiserCustomersService.GenerateConnectionStringFromCustomer(productionCustomer));
+            await using var mainConnection = new MySqlConnection(wiserTenantsService.GenerateConnectionStringFromTenant(productionTenant));
             await mainConnection.OpenAsync();
             await using (var productionCommand = mainConnection.CreateCommand())
             {
-                productionCommand.Parameters.AddWithValue("branchId", selectedBranchCustomer.Id);
+                productionCommand.Parameters.AddWithValue("branchId", selectedBranchTenant.Id);
                 productionCommand.CommandText = $"SELECT MAX(finished_on) AS lastMergeDate FROM {WiserTableNames.WiserBranchesQueue} WHERE branch_id = ?branchId AND success = 1 AND finished_on IS NOT NULL";
 
                 var dataTable = new DataTable();
@@ -947,7 +1102,7 @@ LIMIT 1";
                 }
             }
 
-            await using var branchConnection = new MySqlConnection(wiserCustomersService.GenerateConnectionStringFromCustomer(selectedBranchCustomer));
+            await using var branchConnection = new MySqlConnection(wiserTenantsService.GenerateConnectionStringFromTenant(selectedBranchTenant));
             await branchConnection.OpenAsync();
 
             // If we have no last merge date, it probably means someone removed a record from wiser_branch_queue, in that case get the date of the first change in wiser_history in the branch.
@@ -982,7 +1137,7 @@ LIMIT 1";
             await using (var productionCommand = mainConnection.CreateCommand())
             {
                 productionCommand.Parameters.AddWithValue("branch_id", settings.Id);
-                productionCommand.Parameters.AddWithValue("name", selectedBranchCustomer.Name);
+                productionCommand.Parameters.AddWithValue("name", selectedBranchTenant.Name);
                 productionCommand.Parameters.AddWithValue("action", "merge");
                 productionCommand.Parameters.AddWithValue("data", JsonConvert.SerializeObject(settings));
                 productionCommand.Parameters.AddWithValue("added_on", DateTime.Now);
@@ -1004,26 +1159,26 @@ VALUES (?branch_id, ?action, ?data, ?added_on, ?start_on, ?added_by, ?user_id)";
         /// <inheritdoc />
         public async Task<ServiceResult<bool>> CanAccessBranchAsync(ClaimsIdentity identity, int branchId)
         {
-            var currentBranch = (await wiserCustomersService.GetSingleAsync(identity, true)).ModelObject;
-            var otherBranch = (await wiserCustomersService.GetSingleAsync(branchId, true)).ModelObject;
+            var currentBranch = (await wiserTenantsService.GetSingleAsync(identity, true)).ModelObject;
+            var otherBranch = (await wiserTenantsService.GetSingleAsync(branchId, true)).ModelObject;
 
-            return new ServiceResult<bool>(currentBranch.CustomerId == otherBranch.CustomerId);
+            return new ServiceResult<bool>(currentBranch.TenantId == otherBranch.TenantId);
         }
 
         /// <inheritdoc />
-        public async Task<ServiceResult<bool>> CanAccessBranchAsync(ClaimsIdentity identity, CustomerModel branch)
+        public async Task<ServiceResult<bool>> CanAccessBranchAsync(ClaimsIdentity identity, TenantModel branch)
         {
-            var currentBranch = (await wiserCustomersService.GetSingleAsync(identity, true)).ModelObject;
+            var currentBranch = (await wiserTenantsService.GetSingleAsync(identity, true)).ModelObject;
 
-            return new ServiceResult<bool>(currentBranch.CustomerId == branch.CustomerId);
+            return new ServiceResult<bool>(currentBranch.TenantId == branch.TenantId);
         }
 
         /// <inheritdoc />
         public async Task<ServiceResult<bool>> DeleteAsync(ClaimsIdentity identity, int id)
         {
-            var currentCustomer = (await wiserCustomersService.GetSingleAsync(identity, true)).ModelObject;
-            var productionCustomer = (await wiserCustomersService.GetSingleAsync(currentCustomer.CustomerId, true)).ModelObject;
-            var branchData = await wiserCustomersService.GetSingleAsync(id, true);
+            var currentTenant = (await wiserTenantsService.GetSingleAsync(identity, true)).ModelObject;
+            var productionTenant = (await wiserTenantsService.GetSingleAsync(currentTenant.TenantId, true)).ModelObject;
+            var branchData = await wiserTenantsService.GetSingleAsync(id, true);
 
             // Check if the branch exists or if there were any other errors retrieving the branch.
             if (branchData.StatusCode != HttpStatusCode.OK)
@@ -1036,7 +1191,7 @@ VALUES (?branch_id, ?action, ?data, ?added_on, ?start_on, ?added_by, ?user_id)";
             }
 
             // Make sure the user is not trying to delete the main branch somehow, that is not allowed.
-            if (productionCustomer.CustomerId == id)
+            if (productionTenant.TenantId == id)
             {
                 return new ServiceResult<bool>
                 {
@@ -1046,7 +1201,7 @@ VALUES (?branch_id, ?action, ?data, ?added_on, ?start_on, ?added_by, ?user_id)";
             }
 
             // Check to make sure someone is not trying to delete an environment that does not belong to them.
-            if (branchData.ModelObject.CustomerId != productionCustomer.CustomerId)
+            if (branchData.ModelObject.TenantId != productionTenant.TenantId)
             {
                 return new ServiceResult<bool>(false)
                 {
@@ -1072,7 +1227,7 @@ VALUES (?id, ?name, 'delete', ?now, ?username, ?userId, ?now, ?data)";
             await clientDatabaseConnection.ExecuteAsync(query);
 
             // Delete the row from easy_customers, so that the WTS doesn't need to access the main Wiser database.
-            query = $@"DELETE FROM {ApiTableNames.WiserCustomers} WHERE id = ?id";
+            query = $@"DELETE FROM {ApiTableNames.WiserTenants} WHERE id = ?id";
             wiserDatabaseConnection.AddParameter("id", id);
             await wiserDatabaseConnection.ExecuteAsync(query);
 
@@ -1358,11 +1513,11 @@ WHERE changed_on >= ?lastChange";
                 var value = dataRow.Field<string>("newvalue");
 
                 var conflict = conflicts.LastOrDefault(conflict => conflict.ObjectId == dataRow.Field<ulong>("item_id")
-                                                           && conflict.TableName == dataRow.Field<string>("tablename")
-                                                           && conflict.LanguageCode == dataRow.Field<string>("language_code")
-                                                           && conflict.GroupName == dataRow.Field<string>("groupname")
-                                                           && conflict.FieldName == dataRow.Field<string>("field")
-                                                           && conflict.ValueInBranch != value);
+                                                                   && conflict.TableName == dataRow.Field<string>("tablename")
+                                                                   && conflict.LanguageCode == dataRow.Field<string>("language_code")
+                                                                   && conflict.GroupName == dataRow.Field<string>("groupname")
+                                                                   && conflict.FieldName == dataRow.Field<string>("field")
+                                                                   && conflict.ValueInBranch != value);
 
                 // If we can't find a conflict in the list, it means that the chosen branch has no change for this item/object, so we can skip it.
                 if (conflict == null)
@@ -1452,7 +1607,7 @@ WHERE changed_on >= ?lastChange";
                                 }
                             }
 
-                            entityTypes.Add(conflict.ObjectId,  name);
+                            entityTypes.Add(conflict.ObjectId, name);
                         }
 
                         conflict.Title = entityTypes[conflict.ObjectId];
@@ -1527,6 +1682,7 @@ WHERE changed_on >= ?lastChange";
                         {
                             entityTypeSettings.Add(items[conflict.ObjectId].EntityType, await wiserItemsService.GetEntityTypeSettingsAsync(items[conflict.ObjectId].EntityType));
                         }
+
                         conflict.TypeDisplayName = entityTypeSettings[items[conflict.ObjectId].EntityType].DisplayName;
 
                         // Get the display name for the field.
@@ -1652,106 +1808,6 @@ WHERE changed_on >= ?lastChange";
                 conflict.ChangeDateInMain = dataRow.Field<DateTime>("changed_on");
                 conflict.ChangedByInMain = dataRow.Field<string>("changed_by");
             }
-        }
-
-        /// <summary>
-        /// Get the entity types and table prefixes for both items in a link.
-        /// </summary>
-        /// <param name="sourceId">The ID of the source item.</param>
-        /// <param name="destinationId">The ID of the destination item.</param>
-        /// <param name="linkType">The link type number.</param>
-        /// <param name="mySqlConnection">The connection to the database.</param>
-        /// <param name="allLinkTypeSettings">The list with all settings of all link types.</param>
-        /// <param name="tablePrefixes">The list of all already known table prefixes, so that we don't have to get them from database multiple times.</param>
-        /// <returns>A named tuple with the entity types and table prefixes for both the source and the destination.</returns>
-        private async Task<(string SourceType, string SourceTablePrefix, string DestinationType, string DestinationTablePrefix)?> GetEntityTypesOfLinkAsync(ulong sourceId, ulong destinationId, int linkType, MySqlConnection mySqlConnection, List<LinkSettingsModel> allLinkTypeSettings, Dictionary<string, string> tablePrefixes)
-        {
-            var currentLinkTypeSettings = allLinkTypeSettings.Where(l => l.Type == linkType).ToList();
-            await using var command = mySqlConnection.CreateCommand();
-            command.Parameters.AddWithValue("sourceId", sourceId);
-            command.Parameters.AddWithValue("destinationId", destinationId);
-
-            // If there are no settings for this link, we assume that the links are from items in the normal wiser_item table and not a table with a prefix.
-            if (!currentLinkTypeSettings.Any())
-            {
-                // Check if the source item exists in this table.
-                command.CommandText = $@"SELECT entity_type FROM {WiserTableNames.WiserItem} WHERE id = ?sourceId
-UNION ALL
-SELECT entity_type FROM {WiserTableNames.WiserItem}{WiserTableNames.ArchiveSuffix} WHERE id = ?sourceId
-LIMIT 1";
-                var sourceDataTable = new DataTable();
-                using var sourceAdapter = new MySqlDataAdapter(command);
-                await sourceAdapter.FillAsync(sourceDataTable);
-                if (sourceDataTable.Rows.Count == 0)
-                {
-                    return null;
-                }
-
-                var sourceEntityType = sourceDataTable.Rows[0].Field<string>("entity_type");
-
-                // Check if the destination item exists in this table.
-                command.CommandText = $@"SELECT entity_type FROM {WiserTableNames.WiserItem} WHERE id = ?destinationId
-UNION ALL
-SELECT entity_type FROM {WiserTableNames.WiserItem}{WiserTableNames.ArchiveSuffix} WHERE id = ?destinationId
-LIMIT 1";
-                var destinationDataTable = new DataTable();
-                using var destinationAdapter = new MySqlDataAdapter(command);
-                await destinationAdapter.FillAsync(destinationDataTable);
-                if (destinationDataTable.Rows.Count == 0)
-                {
-                    return null;
-                }
-
-                var destinationEntityType = destinationDataTable.Rows[0].Field<string>("entity_type");
-
-                return (sourceEntityType, "", destinationEntityType, "");
-            }
-
-            // It's possible that there are multiple link types that use the same number, so we have to check all of them.
-            foreach (var linkTypeSettings in currentLinkTypeSettings)
-            {
-                if (!tablePrefixes.TryGetValue(linkTypeSettings.SourceEntityType, out var sourceTablePrefix))
-                {
-                    sourceTablePrefix = await wiserItemsService.GetTablePrefixForEntityAsync(linkTypeSettings.SourceEntityType);
-                    tablePrefixes.Add(linkTypeSettings.SourceEntityType, sourceTablePrefix);
-                }
-                if (!tablePrefixes.TryGetValue(linkTypeSettings.DestinationEntityType, out var destinationTablePrefix))
-                {
-                    destinationTablePrefix = await wiserItemsService.GetTablePrefixForEntityAsync(linkTypeSettings.DestinationEntityType);
-                    tablePrefixes.Add(linkTypeSettings.DestinationEntityType, destinationTablePrefix);
-                }
-
-                // Check if the source item exists in this table.
-                command.CommandText = $@"SELECT entity_type FROM {sourceTablePrefix}{WiserTableNames.WiserItem} WHERE id = ?sourceId
-UNION ALL
-SELECT entity_type FROM {sourceTablePrefix}{WiserTableNames.WiserItem}{WiserTableNames.ArchiveSuffix} WHERE id = ?sourceId
-LIMIT 1";
-                var sourceDataTable = new DataTable();
-                using var sourceAdapter = new MySqlDataAdapter(command);
-                await sourceAdapter.FillAsync(sourceDataTable);
-                if (sourceDataTable.Rows.Count == 0 || !String.Equals(sourceDataTable.Rows[0].Field<string>("entity_type"), linkTypeSettings.SourceEntityType, StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                // Check if the destination item exists in this table.
-                command.CommandText = $@"SELECT entity_type FROM {destinationTablePrefix}{WiserTableNames.WiserItem} WHERE id = ?destinationId
-UNION ALL
-SELECT entity_type FROM {destinationTablePrefix}{WiserTableNames.WiserItem}{WiserTableNames.ArchiveSuffix} WHERE id = ?destinationId
-LIMIT 1";
-                var destinationDataTable = new DataTable();
-                using var destinationAdapter = new MySqlDataAdapter(command);
-                await destinationAdapter.FillAsync(destinationDataTable);
-                if (destinationDataTable.Rows.Count == 0 || !String.Equals(destinationDataTable.Rows[0].Field<string>("entity_type"), linkTypeSettings.DestinationEntityType, StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                // If we reached this point, it means we found the correct link type and entity types.
-                return (linkTypeSettings.SourceEntityType, sourceTablePrefix, linkTypeSettings.DestinationEntityType, destinationTablePrefix);
-            }
-
-            return null;
         }
     }
 }
