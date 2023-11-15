@@ -484,7 +484,7 @@ export class Fields {
                             break;
                     }
 
-                    const fieldContainer = container.closest(".k-tabstrip").find(`[data-property-id='${dependency.propertyId}'].item`).toggle(showElement);
+                    const fieldContainer = container.closest(".k-tabstrip").find(`[data-property-id='${dependency.propertyId}'].item`).toggleClass("dependency-hidden", !showElement);
                     const tabContainer = fieldContainer.closest(".k-content");
                     const allFields = tabContainer.find(".item");
                     const visibleFields = allFields.filter(index => allFields[index].style.display !== "none");
@@ -659,7 +659,7 @@ export class Fields {
         event.sender.wrapper.find(`li[data-uid='${event.files[0].uid}'] .fileId`).html(event.response[0].fileId);
         event.sender.wrapper.find(`li[data-uid='${event.files[0].uid}'] .title`).html(kendo.htmlEncode(event.response[0].title || "(leeg)"));
         event.sender.wrapper.find(`li[data-uid='${event.files[0].uid}'] .fileContainer`).data("fileId", event.response[0].fileId).data("itemId", event.response[0].itemId);
-        event.sender.wrapper.find(`li[data-uid='${event.files[0].uid}'] .name`).attr("href", `${this.base.settings.wiserApiRoot}items/${encodeURIComponent(event.response[0].itemId)}/files/${encodeURIComponent(event.response[0].fileId)}/${encodeURIComponent(event.response[0].name)}?itemLinkId=${event.response[0].itemLinkId || 0}&entityType=${encodeURIComponent(event.response[0].entityType || "")}&linkType=${event.response[0].linkType || 0}&encryptedCustomerId=${encodeURIComponent(this.base.settings.customerId)}&encryptedUserId=${encodeURIComponent(this.base.settings.userId)}&isTest=${this.base.settings.isTestEnvironment}&subDomain=${encodeURIComponent(this.base.settings.subDomain)}`);
+        event.sender.wrapper.find(`li[data-uid='${event.files[0].uid}'] .name`).attr("href", `${this.base.settings.wiserApiRoot}items/${encodeURIComponent(event.response[0].itemId)}/files/${encodeURIComponent(event.response[0].fileId)}/${encodeURIComponent(event.response[0].name)}?itemLinkId=${event.response[0].itemLinkId || 0}&entityType=${encodeURIComponent(event.response[0].entityType || "")}&linkType=${event.response[0].linkType || 0}&encryptedCustomerId=${encodeURIComponent(this.base.settings.tenantId)}&encryptedUserId=${encodeURIComponent(this.base.settings.userId)}&isTest=${this.base.settings.isTestEnvironment}&subDomain=${encodeURIComponent(this.base.settings.subDomain)}`);
         let addedOn = (event.response[0].addedOn ? DateTime.fromISO(event.response[0].addedOn, { locale: "nl-NL" }) : DateTime.fromJSDate(new Date(), { locale: "nl-NL" })).toLocaleString(Dates.LongDateTimeFormat);
         event.sender.wrapper.find(`li[data-uid='${event.files[0].uid}'] .fileDate`).html(kendo.htmlEncode(addedOn));
         event.sender.wrapper.find(".editTitle").click(this.onUploaderEditTitleClick.bind(this));
@@ -708,40 +708,6 @@ export class Fields {
                 field.val(value);
             }
         });
-    }
-
-    /**
-     * Event that gets triggered when the user searches in a combobox field.
-     * @param {any} event The search event from Kendo.
-     * @param {any} itemId The ID of the currently opened item.
-     * @param {any} options The field options.
-     */
-    async onComboBoxFiltering(event, itemId, options) {
-        event.preventDefault();
-        const comboBoxContainer = event.sender.element.closest(".item");
-        if (!options) {
-            console.error("Cannot find options for combo box.");
-            return;
-        }
-
-        const searchEverywhere = options.searchEverywhere && (options.searchEverywhere > 0 || options.searchEverywhere.toLowerCase() === "true") ? 1 : 0;
-        const icon = comboBoxContainer.find(".k-i-arrow-s").addClass("k-loading");
-        const searchFields = options.searchFields || [];
-        const searchInTitle = options.searchInTitle === true || options.searchInTitle === "true" || options.searchInTitle > 0 ? 1 : 0;
-        let searchModuleId = options.moduleId || 0;
-        if (!searchEverywhere && !searchModuleId) {
-            searchModuleId = moduleId;
-        }
-
-        const result = await Wiser.api({
-            url: `${this.base.settings.serviceRoot}/SEARCH_ITEMS?id=${encodeURIComponent(itemId)}&moduleid=${encodeURIComponent(searchModuleId)}&entityType=${encodeURIComponent(options.entityType)}&search=${encodeURIComponent(event.filter.value)}&searchInTitle=${encodeURIComponent(searchInTitle)}&searchFields=${encodeURIComponent(searchFields.join())}&searchEverywhere=${encodeURIComponent(searchEverywhere)}`,
-            method: "GET",
-            contentType: "application/json",
-            dataType: "JSON"
-        });
-
-        event.sender.setDataSource(result);
-        icon.removeClass("k-loading");
     }
 
     /**

@@ -79,7 +79,7 @@ const moduleSettings = {
             this.settings = {
                 moduleId: 0,
                 encryptedModuleId: "",
-                customerId: 0,
+                tenantId: 0,
                 initialItemId: null,
                 iframeMode: false,
                 gridViewMode: false,
@@ -183,7 +183,7 @@ const moduleSettings = {
             // Get user data from API.
             const userData = await Wiser.getLoggedInUserData(this.settings.wiserApiRoot);
             this.settings.userId = userData.encryptedId;
-            this.settings.customerId = userData.encryptedCustomerId;
+            this.settings.tenantId = userData.encryptedTenantId;
             this.settings.zeroEncrypted = userData.zeroEncrypted;
             this.settings.filesRootId = userData.filesRootId;
             this.settings.imagesRootId = userData.imagesRootId;
@@ -528,6 +528,15 @@ const moduleSettings = {
             this.mainValidator = $("#right-pane").kendoValidator({
                 validate: this.onValidateForm.bind(this, this.mainTabStrip),
                 validateOnBlur: false,
+                rules: {
+                    required: (input) => {
+                        if (input.prop("required") && !input.closest(".item").hasClass("dependency-hidden")) {
+                            return $.trim(input.val()) !== "";
+                        }
+
+                        return true;
+                    }
+                },
                 messages: {
                     required: (input) => {
                         const fieldDisplayName = $(input).closest(".item").find("> h4 > label").text() || $(input).attr("name");
@@ -966,7 +975,7 @@ const moduleSettings = {
             this.base.selectedItem = dataItem;
 
             // If we have an original item id, it means this item has multiple version. Then we want to check what the latest version is and open that one.
-            // This used to be done in the query that gets the items for the tree view, but that made the query really slow for some customers, so now we do it here.
+            // This used to be done in the query that gets the items for the tree view, but that made the query really slow for some tenants, so now we do it here.
             if (dataItem.plainOriginalItemId > 0) {
                 let itemToUse = null;
                 const itemEnvironments = await this.getItemEnvironments(dataItem.encryptedOriginalItemId);
