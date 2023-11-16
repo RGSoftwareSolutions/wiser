@@ -9,10 +9,10 @@ using System.Threading.Tasks;
 using Api.Core.Helpers;
 using Api.Core.Models;
 using Api.Core.Services;
-using Api.Modules.Tenants.Interfaces;
-using Api.Modules.Tenants.Models;
 using Api.Modules.Items.Models;
 using Api.Modules.Templates.Interfaces;
+using Api.Modules.Tenants.Interfaces;
+using Api.Modules.Tenants.Models;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Core.Extensions;
 using GeeksCoreLibrary.Core.Helpers;
@@ -40,7 +40,7 @@ namespace Api.Modules.Tenants.Services
         private readonly ILogger<UsersService> logger;
         private readonly ApiSettings apiSettings;
 
-        private const string WiserUserEntityType = "wiseruser";
+        private const string WiserUserEntityType = "WiserUser";
         private const string UserLastLoginDateKey = "last_login";
         private const string UserLastLoginIpKey = "last_login_ip";
         private const string UserPasswordKey = "password";

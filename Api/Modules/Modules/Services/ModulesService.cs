@@ -9,11 +9,11 @@ using System.Threading.Tasks;
 using Api.Core.Helpers;
 using Api.Core.Interfaces;
 using Api.Core.Services;
-using Api.Modules.Tenants.Interfaces;
 using Api.Modules.Grids.Interfaces;
 using Api.Modules.Kendo.Models;
 using Api.Modules.Modules.Interfaces;
 using Api.Modules.Modules.Models;
+using Api.Modules.Tenants.Interfaces;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Core.Enums;
 using GeeksCoreLibrary.Core.Extensions;
@@ -46,7 +46,7 @@ namespace Api.Modules.Modules.Services
         private readonly ILogger<ModulesService> logger;
         private readonly IDatabaseHelpersService databaseHelpersService;
         private readonly ICsvService csvService;
-        
+
         private const string DefaultModulesGroupName = "Overig";
         private const string PinnedModulesGroupName = "Vastgepind";
 
@@ -489,7 +489,7 @@ UNION
                                 CanWrite = true,
                                 Icon = "document-web",
                                 ModuleId = moduleId,
-                                Name = "Webpagina's 2.0",
+                                Name = "Webpagina's",
                                 Type = "DynamicItems",
                                 Pinned = isPinned,
                                 PinnedGroup = PinnedModulesGroupName
@@ -744,7 +744,7 @@ SELECT @newID;";
             var result = excelService.JsonArrayToExcel(newData);
             return new ServiceResult<byte[]>(result);
         }
-        
+
         /// <inheritdoc />
         public async Task<ServiceResult<byte[]>> ExportToCsvAsync(int id, ClaimsIdentity identity, char separator)
         {
@@ -757,7 +757,7 @@ SELECT @newID;";
                     StatusCode = gridResult.StatusCode
                 };
             }
-            
+
             var newData = new JArray();
             var data = gridResult.ModelObject.Data;
             var columns = gridResult.ModelObject.Columns;

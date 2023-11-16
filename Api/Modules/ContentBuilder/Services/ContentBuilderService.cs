@@ -64,11 +64,11 @@ namespace Api.Modules.ContentBuilder.Services
                             file.file_name
                         FROM {WiserTableNames.WiserItem} AS snippet
                         JOIN {WiserTableNames.WiserItemLink} AS link ON link.item_id = snippet.id AND link.type = 1
-                        JOIN {WiserTableNames.WiserItem} AS category ON category.id = link.destination_item_id AND category.entity_type = 'map'
+                        JOIN {WiserTableNames.WiserItem} AS category ON category.id = link.destination_item_id AND category.entity_type IN ('map', 'Directory')
                         LEFT JOIN {WiserTableNames.WiserItemLink} AS linkToRoot ON linkToRoot.item_id = category.id AND linkToRoot.type = 1
                         LEFT JOIN {WiserTableNames.WiserItemFile} AS file ON file.item_id = snippet.id AND file.property_name = 'preview'
                         LEFT JOIN {WiserTableNames.WiserItemDetail} AS html ON html.item_id = snippet.id AND html.`key` = 'html'
-                        WHERE snippet.entity_type = 'content-builder-snippet'
+                        WHERE snippet.entity_type IN ('content-builder-snippet', 'ContentBuilderSnippet')
                         GROUP BY category.id, snippet.id
                         ORDER BY linkToRoot.ordering ASC, link.ordering ASC";
             var dataTable = await clientDatabaseConnection.GetAsync(query);
@@ -122,11 +122,11 @@ namespace Api.Modules.ContentBuilder.Services
 	linkToRoot.ordering AS parentOrdering
 FROM {WiserTableNames.WiserItem} AS template
 JOIN {WiserTableNames.WiserItemLink} AS link ON link.item_id = template.id AND link.type = 1
-JOIN {WiserTableNames.WiserItem} AS category ON category.id = link.destination_item_id AND category.entity_type = 'map'
+JOIN {WiserTableNames.WiserItem} AS category ON category.id = link.destination_item_id AND category.entity_type IN ('map', 'Directory')
 LEFT JOIN {WiserTableNames.WiserItemLink} AS linkToRoot ON linkToRoot.item_id = category.id AND linkToRoot.type = 1
 LEFT JOIN {WiserTableNames.WiserItemFile} AS file ON file.item_id = template.id AND file.property_name = 'preview'
 LEFT JOIN {WiserTableNames.WiserItemDetail} AS html ON html.item_id = template.id AND html.`key` = 'html'
-WHERE template.entity_type = 'content-box-template'
+WHERE template.entity_type IN ('content-box-template', 'ContentBoxTemplate')
 GROUP BY category.id, template.id
 
 UNION
@@ -141,11 +141,11 @@ SELECT
 	template.ordering,
 	IFNULL(linkToRoot.ordering, category.ordering) AS parentOrdering
 FROM {WiserTableNames.WiserItem} AS template
-JOIN {WiserTableNames.WiserItem} AS category ON category.id = template.parent_item_id AND category.entity_type = 'map'
+JOIN {WiserTableNames.WiserItem} AS category ON category.id = template.parent_item_id AND category.entity_type IN ('map', 'Directory')
 LEFT JOIN {WiserTableNames.WiserItemLink} AS linkToRoot ON linkToRoot.item_id = category.id AND linkToRoot.type = 1
 LEFT JOIN {WiserTableNames.WiserItemFile} AS file ON file.item_id = template.id AND file.property_name = 'preview'
 LEFT JOIN {WiserTableNames.WiserItemDetail} AS html ON html.item_id = template.id AND html.`key` = 'html'
-WHERE template.entity_type = 'content-box-template'
+WHERE template.entity_type IN ('content-box-template', 'ContentBoxTemplate')
 GROUP BY category.id, template.id
 
 ORDER BY ordering ASC, parentOrdering ASC";
@@ -184,9 +184,9 @@ ORDER BY ordering ASC, parentOrdering ASC";
 	linkToRoot.ordering AS parentOrdering
 FROM {WiserTableNames.WiserItem} AS template
 JOIN {WiserTableNames.WiserItemLink} AS link ON link.item_id = template.id AND link.type = 1
-JOIN {WiserTableNames.WiserItem} AS category ON category.id = link.destination_item_id AND category.entity_type = 'map'
+JOIN {WiserTableNames.WiserItem} AS category ON category.id = link.destination_item_id AND category.entity_type IN ('map', 'Directory')
 LEFT JOIN {WiserTableNames.WiserItemLink} AS linkToRoot ON linkToRoot.item_id = category.id AND linkToRoot.type = 1
-WHERE template.entity_type = 'content-box-template'
+WHERE template.entity_type IN ('content-box-template', 'ContentBoxTemplate')
 GROUP BY category.id
 
 UNION
@@ -197,9 +197,9 @@ SELECT
 	template.ordering,
 	IFNULL(linkToRoot.ordering, category.ordering) AS parentOrdering
 FROM {WiserTableNames.WiserItem} AS template
-JOIN {WiserTableNames.WiserItem} AS category ON category.id = template.parent_item_id AND category.entity_type = 'map'
+JOIN {WiserTableNames.WiserItem} AS category ON category.id = template.parent_item_id AND category.entity_type IN ('map', 'Directory')
 LEFT JOIN {WiserTableNames.WiserItemLink} AS linkToRoot ON linkToRoot.item_id = category.id AND linkToRoot.type = 1
-WHERE template.entity_type = 'content-box-template'
+WHERE template.entity_type IN ('content-box-template', 'ContentBoxTemplate')
 GROUP BY category.id
 
 ORDER BY ordering ASC, parentOrdering ASC";
@@ -252,7 +252,7 @@ ORDER BY ordering ASC, parentOrdering ASC";
 
             var serializerSettings = new JsonSerializerSettings
             {
-                Formatting = Formatting.Indented, 
+                Formatting = Formatting.Indented,
                 ContractResolver = new DefaultContractResolver
                 {
                     NamingStrategy = new CamelCaseNamingStrategy()
@@ -279,7 +279,7 @@ try {{
 }} catch(e) {{
     //
 }}";
-            
+
             return new ServiceResult<string>(javascript);
         }
 
@@ -304,8 +304,8 @@ try {{
                                                             WHERE item.id = ?itemId
                                                             LIMIT 1");
 
-            return dataTable.Rows.Count == 0 
-                ? new ServiceResult<string>("") 
+            return dataTable.Rows.Count == 0
+                ? new ServiceResult<string>("")
                 : new ServiceResult<string>(await wiserItemsService.ReplaceHtmlForViewingAsync(dataTable.Rows[0].Field<string>("html")));
         }
 

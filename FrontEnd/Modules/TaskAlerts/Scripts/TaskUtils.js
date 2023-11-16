@@ -11,7 +11,7 @@ export class TaskUtils {
      * @param entityType {string} The entity type of the task item.
      * @returns {any} A promise with the result of the AJAX call.
      */
-    static async updateItem(encryptedItemId, inputData, username, wiserApiRoot, isNewItem = false, entityType = "agendering") {
+    static async updateItem(encryptedItemId, inputData, username, wiserApiRoot, isNewItem = false, entityType = "TodoItem") {
         const updateItemData = {
             details: inputData,
             changedBy: username,
@@ -49,10 +49,10 @@ export class TaskUtils {
                 value: "afgerond"
             }
         ];
-        
+
         await this.updateItem(taskId, inputData, username, wiserApiRoot);
-        
-        
+
+
     }
 
     /**

@@ -5,9 +5,9 @@ using System.Security.Claims;
 using System.Threading.Tasks;
 using Api.Core.Helpers;
 using Api.Core.Services;
-using Api.Modules.Tenants.Interfaces;
 using Api.Modules.TaskAlerts.Interfaces;
 using Api.Modules.TaskAlerts.Models;
+using Api.Modules.Tenants.Interfaces;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Core.Extensions;
 using GeeksCoreLibrary.Core.Models;
@@ -65,10 +65,10 @@ namespace Api.Modules.TaskAlerts.Services
     placedBy.value AS placedBy,
     placedById.value AS placedById
 FROM {queryDatabasePart}{WiserTableNames.WiserItem} AS taskAlert
-JOIN {queryDatabasePart}{WiserTableNames.WiserItemDetail} AS userId ON userId.item_id = taskAlert.id AND userId.`key` = 'userid'{userJoinPart}
-JOIN {queryDatabasePart}{WiserTableNames.WiserItem} AS `user` ON `user`.id = userId.`value` AND `user`.entity_type = 'wiseruser'
-JOIN {queryDatabasePart}{WiserTableNames.WiserItemDetail} AS createdOn ON createdOn.item_id = taskAlert.id AND createdOn.`key` = 'agendering_date' AND createdOn.value <= ?now
-LEFT JOIN {queryDatabasePart}{WiserTableNames.WiserItemDetail} AS checkedOn ON checkedOn.item_id = taskAlert.id AND checkedOn.`key` = 'checkedon'
+JOIN {queryDatabasePart}{WiserTableNames.WiserItemDetail} AS userId ON userId.item_id = taskAlert.id AND userId.`key` IN ('userid', 'user_id'){userJoinPart}
+JOIN {queryDatabasePart}{WiserTableNames.WiserItem} AS `user` ON `user`.id = userId.`value` AND `user`.entity_type = 'WiserUser'
+JOIN {queryDatabasePart}{WiserTableNames.WiserItemDetail} AS createdOn ON createdOn.item_id = taskAlert.id AND createdOn.`key` IN ('agendering_date', 'datetime') AND createdOn.value <= ?now
+LEFT JOIN {queryDatabasePart}{WiserTableNames.WiserItemDetail} AS checkedOn ON checkedOn.item_id = taskAlert.id AND checkedOn.`key` IN ('checkedon', 'checked_on')
 LEFT JOIN {queryDatabasePart}{WiserTableNames.WiserItemDetail} AS content ON content.item_id = taskAlert.id AND content.`key` = 'content'
 LEFT JOIN {queryDatabasePart}{WiserTableNames.WiserItemDetail} AS status ON status.item_id = taskAlert.id AND status.`key` = 'status'
 LEFT JOIN {queryDatabasePart}{WiserTableNames.WiserItemDetail} AS linkedItemId ON linkedItemId.item_id = taskAlert.id AND linkedItemId.`key` = 'linked_item_id'
@@ -76,7 +76,7 @@ LEFT JOIN {queryDatabasePart}{WiserTableNames.WiserItemDetail} AS linkedItemModu
 LEFT JOIN {queryDatabasePart}{WiserTableNames.WiserItemDetail} AS linkedItemEntityType ON linkedItemEntityType.item_id = taskAlert.id AND linkedItemEntityType.`key` = 'linked_item_entity_type'
 LEFT JOIN {queryDatabasePart}{WiserTableNames.WiserItemDetail} AS placedBy ON placedBy.item_id = taskAlert.id AND placedBy.`key` = 'placed_by'
 LEFT JOIN {queryDatabasePart}{WiserTableNames.WiserItemDetail} AS placedById ON placedById.item_id = taskAlert.id AND placedById.`key` = 'placed_by_id'
-WHERE taskAlert.entity_type = 'agendering'
+WHERE taskAlert.entity_type IN ('agendering', 'TodoItem')
 AND taskAlert.published_environment > 0
 AND (checkedOn.value IS NULL OR checkedOn.value = '')");
 

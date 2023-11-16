@@ -36,9 +36,9 @@ import {
     GENERATE_TOTP_BACKUP_CODES,
     GET_BRANCH_CHANGES,
     GET_BRANCHES,
-    GET_TENANT_TITLE,
     GET_DATA_SELECTORS_FOR_BRANCHES,
     GET_ENTITIES_FOR_BRANCHES,
+    GET_TENANT_TITLE,
     HANDLE_CONFLICT,
     HANDLE_MULTIPLE_CONFLICTS,
     IS_MAIN_BRANCH,
@@ -216,7 +216,7 @@ class Main {
                     iframe: true,
                     itemId: encryptedUserId,
                     fileName: "",
-                    queryString: `?itemId=${encodeURIComponent(encryptedUserId)}&moduleId=0&iframe=true&entityType=wiseruser`
+                    queryString: `?itemId=${encodeURIComponent(encryptedUserId)}&moduleId=0&iframe=true&entityType=WiserUser`
                 });
                 break;
             }

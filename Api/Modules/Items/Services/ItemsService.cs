@@ -2510,7 +2510,7 @@ ORDER BY {orderByClause}";
 
                 await clientDatabaseConnection.ExecuteAsync(query);
 
-                // In oude map gat opvullen (items opschuiven naar voren).
+                // Move items from the previous directory back one spot.
                 query = $@"UPDATE {WiserTableNames.WiserItemLink}
                         SET ordering = ordering - 1
                         WHERE destination_item_id = ?sourceParentId
